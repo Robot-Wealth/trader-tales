@@ -1,0 +1,206 @@
+---
+title: "Tidy Data and its Shape"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(fig.width = 9, fig.height = 6, fig.align = 'center') 
+```
+
+
+Holding data in a tidy format works wonders for one's productivity. Let's explore the `tidyr` package, which is all about creating tidy data.
+
+In particular, let's develop an understanding of the `tidyr::pivot_longer` and `tidyr::pivot_wider` functions for switching between different formats of tidy data. 
+
+## What's tidy data?
+
+Tidy data is data where:
+
+* Every column is variable.
+* Every row is an observation.
+* Every cell is a single value.
+
+## Why do we care?
+
+It turns out there are huge benefits to thinking about the "shape" of your data and the best way to structure and manipulate it for your problem.
+
+Tidy data is a standard way of shaping data that facilitates analysis. In particular, tidy data works very well with the tidyverse tools. Which means less time spent transforming and cleaning data and more time spent solving problems. In short, structuring data to facilitate analysis is an enormous productivity hack. 
+
+Thinking in these terms has had a MASSIVE impact on the effectiveness and speed of our research. We're going to cover this in some detail in the Armageddon bootcamp, along with some specific patterns for doing trading analysis. 
+
+## Wide vs Long Data
+
+Let's take a look at some long-format data. This code loads a long dataframe of daily returns for various indexes and prints the observations from the beginning of March 2020:
+
+```{r libraries, warning=FALSE}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, here, knitr, kableExtra)
+load(here::here('data', 'indexreturns.RData'))
+
+dailyindex_df <- dailyindex_df %>%
+  filter(date >= '2020-03-01') 
+
+dailyindex_df %>%
+  kable() %>%
+  kable_styling(full_width = FALSE, position = 'center') %>%
+  scroll_box(width = '800px', height = '300px')
+```
+Long data is presented with one or more columns containing a key and another containing all the values.
+
+In this example, the key, or so-called "unit of analysis: is date-ticker. That is, each value (in the returns column) is uniquely associated with a date-ticker joint key.
+
+The joint key date-ticker would be the starting point of any analysis we'd want to do on this data set.
+
+This is often easier to manage and process, however if you're used to looking at spreadhseets it can be harder to understand intuitively (although I think that this difficulty evaporates fairly quickly once you start using the tools).
+
+While structuring data as key-value pairs might seem odd if you're not used to it, it does actually facilitate your conceptual clarity of the problem at hand. 
+
+For example, in the example above, it is clear that the unique identifier of each return is the date-ticker joint key. 
+
+With that clarity, it becomes much simpler to imagine the steps in an analysis workflow. You get quite productive and effective at this with a little practice. 
+
+Let's compare this with the same data in wide format:
+
+```{r}
+dailyindex_df %>%
+  pivot_wider(names_from = ticker, values_from = returns) %>%
+  kable() %>%
+  kable_styling(position = 'center') %>%
+  scroll_box(width = '800px', height = '300px')
+```
+This might look more familiar. Here we have a row for each date and a column for the return corresponding to each index. The unique values in the ticker column are actual columns in this wide format. 
+
+Data in this format is probably more amenable human consumption. 
+
+## So which is better - wide or long format?
+
+It depends! 
+
+You'll find that storing your data in long format facilitates exploration and analysis, particularly if you use the tidyverse tools. We highly recommend that you do all your tidy analysis in long format unless you have a good reason not to. 
+
+Long format data is also easy to maintain - adding a new variable (a new ticker, say) is as simple as appending rows to the bottom of the existing data frame (and maybe sorting it by date, if you wanted to).
+
+One use case that you see all the time is using ggplot to visualise a variable for more than one member of some organising category, for example a time series plot of a bunch of different price curves where the organising category is ticker. 
+
+On the other hand, wide format data might be a better choice if you intend for a human to consume the data. 
+
+You will also find certain functions and algorithms that expect data in this format, for example `stats::cor`.
+
+## The practical reality
+
+A good rule of thumb (and one that we follow) is to keep your data in long format whenever you're doing any data manipulation or processing, and save wide format for displaying it. 
+
+Of course, there are exceptions and sometimes you have a reason not to do your processing in long format, for instance when a function requires a wide data frame. 
+
+That means that in reality you'll often find yourself wanting to switch between long and wide format. Fortunately, Fortunately, using the `tidyr` package, it is very simple to convert from long to wide format and back again.
+
+### Pivoting from long to wide
+
+We've already seen an example of pivoting from long to wide format. Let's explore that in a little more detail.
+
+We use `tidyr::pivot_wider` to go from long to wide. 
+
+The most important arguments to the function are `id_cols`, `names_from` and `values_from`, and they each specify a column in our long dataframe.
+
+- The `id_cols` column specifies the unique identifier of each observation in our wide dataframe.
+- The unique values in the `names_from` column become the column names in the wide dataframe.   
+- The values in the `values_from` column get populated into the cells of the wide dataframe.   
+
+In our example:   
+- We want to index our wide dataframe by date, so we specify `id_cols = date`
+- We want the tickers to form columns in the wide dataframe, so we specify `names_from = ticker`
+- We want to populate our wide dataframe with returns values, so we specify `values_from = returns`  
+
+Here's what that looks like:
+
+```{r}
+dailyindex_df %>%
+  pivot_wider(id_cols = date, names_from = ticker, values_from = returns) %>%
+  kable() %>%
+  kable_styling(position = 'center') %>%
+  scroll_box(width = '800px', height = '300px')
+```
+Could that be any easier?
+
+Actually, yes!
+
+`id_cols` defaults to any column or columns that aren't specified by the `names_from` and `values_from` arguments. So in our case, we could actually not even bother with the `id_cols` argument:
+
+```{r}
+dailyindex_df_wide <- dailyindex_df %>%
+  pivot_wider(names_from = ticker, values_from = returns)
+
+dailyindex_df_wide %>%
+  kable() %>%
+  kable_styling(position = 'center') %>%
+  scroll_box(width = '800px', height = '300px')
+```
+
+Same result as above. Brilliant. 
+
+### Pivoting from wide to long
+
+For pivoting from wide to long, we use `tidry::pivot_longer`. 
+
+The most important arguments to the function are `cols`, `names_to` and `values_to`. You can probably guess at their relationship to the arguments to `pivot_wider`.
+
+- `cols` specifies the columns that we want to take from wide to long.
+- `names_to` specifies a name for the column in our long dataframe that will hold the column names from the wide dataframe.   
+- `values_to` specifies a name for the column in our long dataframe that will hold the values in the cells of the wide dataframe.   
+
+In our example:   
+- We want to take the columns holding the returns for each ticker from wide to long, so we want `cols` to take all the columns except date. We can do that by specifying `cols = -date`
+- We want the names of the `cols` to be held in a long variable called `tickers`, so we specify `names_to = "ticker"`. Note that `"ticker"` here is a string variable. 
+- We want to hold the values from our wide columns in a long column called `"returns"` so we specify `values_to = "returns"`. Again note the string variable.  
+
+Here's what that looks like:
+
+```{r}
+dailyindex_df_wide %>%
+  pivot_longer(cols = -date, names_to = 'ticker', values_to= 'returns') %>%
+  kable() %>%
+  kable_styling(full_width = FALSE, position = 'center') %>%
+  scroll_box(width = '800px', height = '300px')
+```
+
+And you can see that we've recovered our original long form dataframe. 
+
+## An example
+
+One example where you'd be forced to pivot you long returns dataframe to wide would be to calculate a correlation matrix:
+
+```{r}
+dailyindex_df %>%
+  pivot_wider(names_from = ticker, values_from = returns) %>%
+  select(-date) %>%
+  cor(use = "pairwise.complete.obs", method='pearson') %>%
+  kable() %>%
+  kable_styling(position = 'center') %>%
+  scroll_box(width = '800px', height = '300px')
+```
+
+You can see that we've also used the `select` function from `dplyr` to drop the date column before passing the wide dataframe of returns to the `cor` function for calculating the correlation matrix.
+
+## Plotting long format data
+
+When you want to plot more than one variable on a single chart, long data is most definitely your friend:
+
+```{r, returns_coloured, fig.width=9, fig.height=6, fig.align='center'}
+dailyindex_df %>%
+  ggplot(aes(x = date, y = returns, colour = ticker)) +
+    geom_line()
+```
+Plotting each returns series in a grid is equally simple:
+
+```{r, returns_faceted, fig.width=9, fig.height=6, fig.align='center'}
+dailyindex_df %>%
+  ggplot(aes(x = date, y = returns)) +
+    geom_line() +
+    facet_wrap(~ticker)
+```
+
+Using wide format data to make a similar plot would require repeated calles to `geom_line` for each variable, which is quite painstaking and brittle. 
+
+For example, if something changes upstream, such as the addition of a new ticker to the data set, your code will also need to change in order to plot it. That's not the case if we use long data with a column holding the ticker variable. 
