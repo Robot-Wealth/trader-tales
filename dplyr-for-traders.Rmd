@@ -1,0 +1,204 @@
+# dplyr for traders
+
+We're going to show how a quant trader can manipulate stock price data using the dplyr package.
+
+```{r}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, here)
+```
+
+First, load some price data. 
+
+`energystockprices.RDS` contains a data frame of daily price observations for 3 energy stocks.
+
+```{r}
+prices <- readRDS(here::here('data','energystockprices.RDS'))
+prices
+```
+
+We've organised our data so that
+
+- Every column is variable.
+- Every row is an observation.
+
+In this data set:
+
+- We have 13,314 rows in our data frame.
+- Each row represents a daily price *observation* for a given stock.
+- For each observation measure the open, high, low and close prices, and the volume traded.
+
+This is a very helpful way to stucture your price data. We'll see how we can use the dplyr package to manipulate price data for quant analysis.
+
+# The main dplyr verbs
+
+There are 6 main functions to master in dplyr. 
+
+- `filter()` picks outs observations (rows) by some filter criteria
+- `arrange()` reorders the observations (rows)
+- `select()` picks out the variables (columns)
+- `mutate()` creates new variables (columns) by applying transformations to existing variables
+- `summarise()` allows you to group and summarise data - reducing the data into a grouped summary with fewer rows.
+
+Finally, the `group_by()` causes the verbs above to act on a group at a time, rather than the whole dataset.
+
+We'll go through them one by one.
+
+## Filter
+
+### Filtering rows for a single stock with `filter()` and ==
+
+```{r}
+prices %>%
+  filter(ticker == 'XOM')
+```
+
+Filter returns all observations (rows) which satisfy the criteria within the filter function.
+
+### Filtering rows for multiple stocks with `filter()` and %in%
+
+```{r}
+prices %>%
+  filter(ticker %in% c('XOM','CVX'))
+```
+
+## Arrange
+
+Arrange reorders the rows in your data by one or more criteria.
+
+## Reordering rows in order of volume traded ascending with `arrange()`
+
+```{r}
+prices %>%
+  arrange(desc(volume))
+```
+
+## Reordering rows in order of date descending, then volume ascending with `arrange()`
+
+```{r}
+prices %>%
+  arrange(desc(date), volume)
+```
+
+# Select
+
+## Selecting columns with `select()`
+
+Here we use select to pull out the ticker, date, close columns.
+
+```{r}
+prices %>%
+  select(ticker, date, close)
+```
+
+## Chaining transformations together: Filtering, electing and reordering. 
+
+Now we'll see how we can chain transformations together. We're going to filter out a single stock, then select the date and close price, then reorder by date descending.
+
+```{r}
+prices %>%
+  filter(ticker == 'XOM') %>%
+  select(date, close) %>%
+  arrange(desc(date))
+```
+
+When debugging a dplypr pipeline, it can be helpful to select each transformation one by one, and press CTRL-Enter in Rstudio to just run the selected transfomration.
+
+# Mutate
+
+Now we get onto slightly more exciting stuff. 
+
+Mutate lets us add variables (columns) to our data. These are usually derived from existing columns.
+
+## Add new variable (column) for log volume with `mutate()`
+
+Here we use mutate to add a column called `logvolume` to our data. It is calculated as the log of the `volume` variable.
+
+```{r}
+prices %>%
+  mutate(logvolume = log(volume))
+```
+
+## Add new variable (column) for intraday returns with `mutate()`
+
+Now we add a column for the intraday (open to close) simple returns of the stock each day.
+
+```{r}
+prices %>%
+  mutate(intradayreturns = close / open - 1)
+```
+
+# Summarise
+
+`Summarise()` summarises all our observations to a single row.
+
+## Calculate the mean volume traded for all observations using `summarise()`
+
+Let's use it to calculate the mean volume traded over our data set. 
+
+```{r}
+prices %>%
+  summarise(meanvolume = mean(volume),
+            count = n())
+```
+
+## Use `summarise()` with `group_by()` to calculate mean traded volume for each stock
+
+That's not always very useful. 
+
+Usually you want to group by a variable, and then summarise that grouped data.
+
+The `group_by()` function tells the dplyr verbs to operate on each group one at a time. 
+
+If we group by ticker, then call summarise, then dplyr will preform the summary calculations separately for each ticker. We will get a row for each ticker.
+
+```{r}
+prices %>% 
+  group_by(ticker) %>%
+  summarise(meanvolume = mean(volume))
+```
+
+## Use `summarise()` with multiple `group_by` variables, to calculate the mean traded volume for each stock for each year
+
+```{r}
+library(lubridate)
+prices %>%
+  mutate(year = year(date)) %>%
+  group_by(ticker, year) %>%
+  summarise(meanvolume = mean(volume),
+            obscount = n())
+```
+
+
+# `group_by` with `mutate()`
+
+We can also use `group_by` with `mutate()` to calculate new variables which are calculated separately for a given variable (or set of variables)
+
+One way you'll use this nearly everytime you do any quant analysis is to calculate periodic returns. 
+
+## Using `group_by` with `mutate()` and `lag()` to calculate daily close-to-close returns
+
+```{r}
+prices %>%
+  group_by(ticker) %>%
+  arrange(date) %>%
+  mutate(c2creturns = close / lag(close) - 1)
+```
+
+# Summary
+
+Arrange your data so:
+
+- Every column is variable
+- Every row is an observation
+
+You can then easily use dplyr to manipulate that data very efficiently. 
+
+There are 6 main functions to master in dplyr. 
+
+- `filter()` picks outs observations (rows) by some filter criteria
+- `arrange()` reorders the observations (rows)
+- `select()` picks out the variables (columns)
+- `mutate()` creates new variables (columns) by applying transformations to existing variables
+- `summarise()` allows you to group and summarise data - reducing the data into a grouped summary with fewer rows.
+
+The `group_by()` causes the verbs above to act on a group at a time, rather than the whole dataset.

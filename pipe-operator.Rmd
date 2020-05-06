@@ -1,0 +1,104 @@
+# Objects, Functions and The Pipe Operator %>%
+
+Everything in R is an object
+
+Make an object and use str to look at its type
+
+```{r}
+x <- 10
+str(x)
+```
+
+Functions are things that operate on objects.
+For example, we can use sum to add numbers.
+
+```{r}
+sum(1,2,3)
+```
+
+
+Functions are also objects
+
+```{r}
+str(sum)
+```
+
+You can make your own functions
+
+```{r}
+jamessum <- function(a,b) {
+  return(a+b+1)
+}
+
+jamessum(1,2)
+```
+
+Functions are written as verb(object)
+
+When you see functions written down it looks like verb(noun)
+Pick up the cat ===> pickup(cat)
+
+This makes sense when you are only doing one thing to an object or a group of objects
+
+But often we are doing multiple things to to the cat.
+When we're talking about this we might say:
+
+Get the cat
+ - then pick it up
+ - then put it on your lap
+ - then stoke it.
+
+The pipe operator %>% is a useful thing that let us do this
+
+
+cat %>%
+  pick_up() %>%
+  put_on_lap() %>%
+  stroke()
+
+
+Whereas in our normal syntax land we would have to do this...
+
+stroke(put_on_lap(pick_up(cat)))
+
+...which you'll probably agree is a lot more confusing
+It is backwards compared to the way you understand it as a human.
+
+
+The pipe operator let's us chain together operations on the same object.
+
+The tidyverse package functions are written in a consistent way that makes it easy to chain things together.
+
+Install and load tidyverse
+
+```{r}
+install.packages('tidyverse')
+library(tidyverse)
+```
+
+
+We'll look at a real example, but first let's just explain exactly what that operator is doing.... 
+
+Remember our sum operator, we can use it to add up numbers
+
+```{r}
+sum(1,2,3)
+```
+
+Those things that we passed to the function are called arguments.
+The pipe operator just lets us insert the first of those arguments from outside the function itself
+
+```{r}
+1 %>% sum(2,3)
+```
+
+
+That's it really. The pipe just makes it easy to chain stuff together
+
+```{r}
+x %>% 
+  sum(10) %>%
+  max(1,2,4) %>%
+  sqrt()
+```
+
