@@ -1,0 +1,199 @@
+---
+title: "How to Get Historical SPX Constitituents Data For Free"
+output: html_notebook
+---
+
+One of the biggest challenges in looking for opportunities amongst a broad universe of stocks, is choosing what "universe" to look at.
+
+One approach to this is to pick the stocks that are currently in S&P 500.
+
+That seems attractive because it is easy.
+
+Unfortunately, the stocks that are currently in the S&P 500 index weren't all there last year. A third of them weren't there ten years ago... 
+
+If we create a _historical_ data set by picking _current_ index consituents, then we will be including historical data for smaller stocks that weren't in the index at that time.
+
+And these are all going to be stocks that did very well, historically - otherwise they wouldn't have got in the index!
+
+So this selection technique biases our stock returns higher. 
+
+The average past returns of _current_ SPX constiuents is higher than the average past returns of _historic_ SPX consituents, due to this upward bias.
+
+It's easy to see how this may cause us to overstate the returns for any analysis that has us net long stocks, if we're not careful.
+
+It's perhaps less obvious that this will significantly bias ANY analysis we do on that universe. Market inefficiencies are very small and noisy at the best of times. The inefficiency we've artifically introduced by our universe selection will be by far the largest effect in our data set.
+
+Of course, the careful researcher will find ways to control for these effects - but it's nice to minimise them to start with, if we can...
+
+A better starting point for our analysis would be to look at stocks that were actually in the index at the time. For that we need to know what the historical SPX constituents actually were.
+
+There are several companies that will sell this data to you - but let's try to construct it for free from data that is freely available on the internet.
+
+Wikipedia publishes current S&P 500 component stocks here: https://en.wikipedia.org/wiki/List_of_S%26P_500_companies
+
+I checked this against the master data set we use in our trading at Robot Wealth (which we pay for) - and it all matches. 
+
+
+If we use the chrome inspector we can see that the s&p 500 stock constituents are in an html table with id #constituents
+
+So let's use the `rvest` R package to scrape that data into a data frame. 
+
+
+```{r}
+# Load dependencies
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, rvest)
+
+wikispx <- read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
+currentconstituents <- wikispx %>%
+  html_node('#constituents') %>%
+  html_table(header = TRUE)
+
+currentconstituents
+```
+
+Wikipedia also publishes "Selected Changes to the list of S&P 500 components" on the same page.
+
+This lists stocks that have been added or removed from the index as a result of acquisitions, or as the companies grows and shrink in market capitalisation.
+
+I've checked this against our data set and it's relatively accurate and complete up to about 2000 - and gets less complete before then.
+
+But we don't need perfection here... so let's scrape these changes. The Chrome Inspector shows us they live in a table with id #changes.
+
+
+```{r}
+spxchanges <- wikispx %>%
+  html_node('#changes') %>%
+  html_table(header = FALSE, fill = TRUE) %>%
+  filter(row_number() > 2) %>% # First two rows are headers
+  `colnames<-`(c('Date','AddTicker','AddName','RemovedTicker','RemovedName','Reason')) %>%
+  mutate(Date = as.Date(Date, format = '%B %d, %Y'),
+         year = year(Date),
+         month = month(Date))
+
+spxchanges
+```
+
+Now we want to create monthly snapshots of what the index used to look like. 
+
+To do this we:
+ - start at the current constituents
+ - iterate backwards in months and add back the stocks that were removed, and remove the stocks that were added.
+ 
+ (If that sounds back to front, it's because we are working backwards in time through the data!)
+
+```{r}
+# Start at the current constituents...
+currentmonth <- as.Date(format(Sys.Date(), '%Y-%m-01'))
+monthseq <- seq.Date(as.Date('1990-01-01'), currentmonth, by = 'month') %>% rev()
+
+spxstocks <- currentconstituents %>% mutate(Date = currentmonth) %>% select(Date, Ticker = Symbol, Name = Security)
+lastrunstocks <- spxstocks
+
+# Iterate through months, working backwards
+for (i in 2:length(monthseq)) {
+  d <- monthseq[i]
+  y <- year(d)
+  m <- month(d)
+  changes <- spxchanges %>% 
+    filter(year == year(d), month == month(d)) 
+
+  # Remove added tickers (we're working backwards in time, remember)
+  tickerstokeep <- lastrunstocks %>% 
+    anti_join(changes, by = c('Ticker' = 'AddTicker')) %>%
+    mutate(Date = d)
+  
+  # Add back the removed tickers...
+  tickerstoadd <- changes %>%
+    filter(!RemovedTicker == '') %>%
+        transmute(Date = d,
+                  Ticker = RemovedTicker,
+                  Name = RemovedName)
+  
+  thismonth <- tickerstokeep %>% bind_rows(tickerstoadd)
+  spxstocks <- spxstocks %>% bind_rows(thismonth)  
+  
+  lastrunstocks <- thismonth
+}
+spxstocks
+```
+
+
+Now - we've done it! We have a free data set of historical SPX constituents going back to 1990...
+It's not going to be perfect, because it's wikipedia, but it's a much better starting point for a universe from which to investigate cross-sectional effects in large cap equities...
+
+Let's sense check some things by plotting the number of stocks in the index by date...
+
+```{r}
+spxstocks %>%
+  group_by(Date) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x=Date, y=count)) +
+    geom_line() +
+    ggtitle('Count of historic SPX constituents by Date')
+```
+
+It looks reasonable.
+
+We should probably be increasingly wary about its accuracy the further back we go in time.
+
+That's fine. We often have to make do.
+
+
+First I'll include all the code needed to produce the data set here, so it's all in one place...
+
+```{r}
+wikispx <- read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
+
+currentconstituents <- wikispx %>%
+  html_node('#constituents') %>%
+  html_table(header = TRUE)
+
+spxchanges <- wikispx %>%
+  html_node('#changes') %>%
+  html_table(header = FALSE, fill = TRUE) %>%
+  filter(row_number() > 2) %>% # First two rows are headers
+  `colnames<-`(c('Date','AddTicker','AddName','RemovedTicker','RemovedName','Reason')) %>%
+  mutate(Date = as.Date(Date, format = '%B %d, %Y'),
+         year = year(Date),
+         month = month(Date))
+
+currentmonth <- as.Date(format(Sys.Date(), '%Y-%m-01'))
+monthseq <- seq.Date(as.Date('1990-01-01'), currentmonth, by = 'month') %>% rev()
+
+spxstocks <- currentconstituents %>% mutate(Date = currentmonth) %>% select(Date, Ticker = Symbol, Name = Security)
+lastrunstocks <- spxstocks
+# Test i <- 2
+
+# Iterate through months, working backwards
+for (i in 2:length(monthseq)) {
+  d <- monthseq[i]
+  y <- year(d)
+  m <- month(d)
+  changes <- spxchanges %>% 
+    filter(year == year(d), month == month(d)) 
+
+  # Remove added tickers (we're working backwards in time, remember)
+  tickerstokeep <- lastrunstocks %>% 
+    anti_join(changes, by = c('Ticker' = 'AddTicker')) %>%
+    mutate(Date = d)
+  
+  # Add back the removed tickers...
+  tickerstoadd <- changes %>%
+    filter(!RemovedTicker == '') %>%
+        transmute(Date = d,
+                  Ticker = RemovedTicker,
+                  Name = RemovedName)
+  
+  thismonth <- tickerstokeep %>% bind_rows(tickerstoadd)
+  spxstocks <- spxstocks %>% bind_rows(thismonth)  
+  
+  lastrunstocks <- thismonth
+}
+```
+
+Save data to RDS
+
+```{r}
+saveRDS(spxstocks, file = 'historicalspx.RDS')
+```
