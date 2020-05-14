@@ -12,31 +12,10 @@ Then pull out each bit into a bite sized recipe.
 library(tidyverse)
 ```
 
-## Functionals: what and why
-
-
-- problem solving centred on functions - a good fit for data analysis
-- functions behave like other data structures, eg you can assign them to a variable, create them inside other functions, return them as a results of a function etc
-
-Functionals allow you to take a function that solves the problem for a single input and generalise it to handle any number of inputs. 
-
-One use case is an alternative to for looops - makes code much more readable and understandable (concise, plus when you see a functional, you know what it's used for, since each functional is rather specific).
-
-While you're learning purrr, there's one approach to replacing for loops with functionals that fits really nicely with the purrr syntax.
-Example. We'll see this below. 
 
 ## Syntaxes
 
-~ creates a formula eg lm(mpg ~ wt)
-Formulas prevent immediate evaluation of symbols. eg 
 
-x <- ~f(a+b) can be executed without f, a or b being defined!
-
-Why is that useful?
-
-map needs a function, but it also accepts a formula, character/numeric vector or list which are converted to functions.
-
-~ . can be used as an anonymous function call, in this case function(x) x
 
 ## purrr
 
@@ -165,34 +144,7 @@ map(1:5, ~rnorm(5)) %>%
 ```
 https://stackoverflow.com/questions/44834446/what-is-meaning-of-first-tilde-in-purrrmap
 
-tilde-dot (`~.`) is shorthand for anonymous functions (`.p` and `.f` in the `modify_if` example). eg
-```R
-function(x) {
-	x*2
-}
-```
-becomes 
 
-```R
-~{. + 10}
-```
-
-Syntax:
-In this case, `~` indicates the start of an anonymous function. The argument to the function can be referred to as `.` (sometimes you see this written `.x`). The `~.` function argument is *always* `.` or `.x`. 
-
-Note that ~ also indicates a function eg lm(y ~ x). If we did map(z, ~lm(y ~ x, data = .)), R would interpret lm(...) as an anonymous function, with a formula inside. This syntax allows tidyverse functions to construct anonymous functions on the fly.
-
-Note this aplies in the tidyverse... outside of that ~ in R refers to a formula, and . refers to all colums not used, eg lm(x ~ .,)
-
-In the tidyverse, ~ turns a formula into a function.
-The tilde notation is basically turning a formula into a function, which is most times easier to read. Each option can be turned into a named function, which works as follows. Ideally, the named function reduces the complexity of the underlying function to one argument (the one which should be looped over) and in this case the function can be called like all simple functions in map without further arguments/notations.
-
-https://stackoverflow.com/questions/56621051/in-map-when-is-it-necessary-to-use-a-tilde-and-a-period-and
-
-More correctly, ~ in tidyverse is a special case of the formula:
-The tilde operator in R is a general operator that creates a formula object.
-However, the usage in your specific pieces of code is a special case of that: purrr co-opts formulas to implement an anonymous function notation.
-https://stackoverflow.com/questions/56650810/what-does-the-tilde-mean-in-this-context-of-r-code
 
 
 
@@ -231,20 +183,20 @@ approach to replacing for loops with functionals that fits really nicely with th
 ### 
 
 
-### Understanding purrr's .x notation ###
-
 
 ## pipe something into an argument other than first
 mydata %>%
 	lm(x ~ y, data = .)
 
-### . versus ~
-
-# ~: delay evaluation of expressions
 
 ## purr tricks
 library(purrr)
 map(x, 1) # get the first elements from a nested list
+
+### get information about columns quickly
+purrr::map_int(mtcars, n_distinct)
+#>  mpg  cyl disp   hp drat   wt qsec   vs   am gear carb 
+#>   25    3   27   22   22   29   30    2    2    3    6
 
 # use map2 like python zip
 win_rates <- seq(0.5, 0.65, by = 0.02)
@@ -272,8 +224,11 @@ gapminder <- read.csv("https://raw.githubusercontent.com/swcarpentry/r-novice-ga
 gapminder %>%
   map_chr(class)
 ```
+
 `map` operateds on all columns
 `dplyr::summarise` summarises specified columns
+
+
 ```{r}
 gapminder %>%
   map_df(~data.frame(num = n_distinct(.)))

@@ -1,0 +1,121 @@
+---
+title: "Tidy Evaluation"
+output: html_notebook
+---
+
+"A framework for metaprogramming in R used in the tidyverse to implement data masking"
+
+Uh huh.
+
+Metaprogramming: using a a programming language to manipulate or modify its own code. 
+
+Why?
+- Promote dataframes to full blown scopes, where column names are exposed as objects
+- Other reasons
+
+Data masking: dataframes promoted to first class objects. The dataframe has it's own "scope":
+
+```{r}
+library("tidyverse")
+
+starwars %>% filter(
+  height < 200,
+  gender == "male"
+)```
+```
+
+Compared with
+
+```{r}
+starwars[starwars$height < 200 & starwars$gender == "male", ]
+
+```
+
+which requires being explicit about where the columns come from (`dataframe$column`).
+
+This only works in the tidyverse because we can modify the normal flow of evaluation using metaprogramming techniques (implemented behidn the scenes throughout the tidyverse).
+
+Specifcally, tidy functions typically "quote" an expression (eg using `vars()`) which essentially saves that expression and delays its execution for later, until ...
+
+
+`!!`: unquote
+`sym`: string that represents other objects
+Quote-unquote pattern
+
+... these tools allow you to build tidy pipelines that are reusable.... I think....
+
+But when might you not use them, and instead do something simpler?
+- make a function that takes fixed column names: I do this quite a lot, where I make functions that are specific to the project or analysis I'm doing right now, but that will not generalise to another context where my data is named differently. Another application is interfacing with a web API for retrieving data.
+
+Good idea to fail early:
+```{r}
+f <- function(data) {
+  if (!all(c("colname1", "colname2") %in% names(data))) {
+    stop("`data` must contain `colname1` and `colname2` columns")
+  }
+```
+
+
+- use a loop automation tool (column-wise mapping, like in purrr), or row-wise vectorisation (which dplyr takes care of using the normal R vectorisation, but augmented with grouping functionality)
+SCoped variants of `dplyr` verbs are also useful for making slightly more general functions: 
+
+`_at` (operate on a slection of columns - either by index or name):
+
+```{r}
+mtcars %>%
+  summarise_at(1:3, mean)
+
+mtcars %>%
+  summarise_at(c("wt", "qsec"), sd)
+```
+Additionally, you can use `vars()` to craft selections based on expressions:
+
+```{r}
+starwars %>%
+  summarise_at(vars(height:mass), mean, na.rm = TRUE)
+
+starwars %>%
+  summarise_at(vars(ends_with("_color")), n_distinct)
+```
+
+
+`_if` (operate on conditions that are TRUE)
+
+```{r}
+# promoate any character columns to grouping variables
+iris %>%
+  group_by_if(is.character)
+```
+
+
+`_all` (operate on all columns of the data frame) 
+
+```{r}
+iris %>%
+  group_by(Species) %>%
+  summarise(m = mean(Sepal.Length))
+
+iris %>%
+  group_by(Species) %>%
+  summarise_all(mean)
+```
+The scoped variants are particularly useful because they are cognizant of groupings...
+
+They also accept optional functions to map over the selection of columns:
+
+```{r}
+iris %>% 
+  group_by_if(is.factor, as.character)
+
+storms %>%
+  select_at(vars(name:hour), toupper)
+```
+
+"These scoped variants lie at the intersection of purrr and dplyr, combining row-wise looping of dplyr with column-wise mapping of purrr."
+
+**IDEA:** content on knowing which tool to use for a particular job would be most helpful. 
+
+How can we pass expressions via `{{` and `...` ??
+Pass column names to `.data[[` and `one_of()` ??
+
+
