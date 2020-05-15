@@ -1,0 +1,14 @@
+# Functional Programming Recipes
+
+- Make a dataframe of random numbers
+- Extract a named/indexed element from nested lists - JSON
+- Easy exlploratory data analysis in purrr: mean, type, ndistinct etc of every column
+- Rolling window calculations using a function that take a single argument eg `mean` - `slide_dbl`
+- Rolling window calculations using a fucntion that takes 2 arguments eg `cor` - `slide2_dbl`
+- Rolling beta, rolling correlation, rolling sharpe, rolling vol, rolling zscore
+- Compare the above with calculating on the entire data set using `purrr::map`
+- I have a for loop that loops over columns: `map`
+- I want to group a variable by another variable - eg price by stock, return by year, return by month etc
+- Seasonality stuff
+- Difference between purrr::map and dplyr:summarise - `map` operateds on all columns, `dplyr::summarise` summarises specified columns..which leads to some interesting use cases of dplyr's scoped variants
+- Trick for building custom mapping functions
