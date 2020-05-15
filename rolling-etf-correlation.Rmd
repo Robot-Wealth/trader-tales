@@ -1,0 +1,201 @@
+---
+title: "Rolling Correlation of ETF Constituents"
+output: html_notebook
+---
+
+```{r, include=FALSE} 
+knitr::opts_chunk$set(fig.width = 9, fig.height = 5, fig.align = 'center')
+```
+
+How might we calculate rolling correlations between constituents of an ETF, given a dataframe of prices?
+
+For problems like this, the `tidyverse` really shines. There are a number of ways to solve this problem ... read on for our solution, and let us know if you'd approach it differently! 
+
+First, we load some packages and some data that we extracted earlier. `xlfprices.RData` contains a dataframe, `prices_xlf`, of constituents of the XLF ETF and their daily prices. You can get this data from our [GitHub repository](https://github.com/Robot-Wealth/r-quant-recipes/tree/master/data). 
+
+The dataset isn't entirely accurate, as it contains prices of today's constituents and doesn't account for historical changes. But that won't matter for our purposes. 
+
+```{r, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+library(glue)
+library(here)
+theme_set(theme_bw())
+
+load(here::here("data", "xlfprices.RData"))
+
+prices_xlf %>%
+  head(10)
+```
+
+We'd like to be able to calculate *rolling average pairwise correlations* between all the stocks in as tidy a way possible.
+
+That requires that we calculate the rolling pairwise correlation between all the stock combinations in the index and then take the mean of all those.
+
+A good way to tacke such problems is to chunk them down into bite-sized pieces, and then solve each piece in turn. We split the problem into the following steps:
+
+- calculate returns for each ticker 
+- create a long dataframe of all the pairwise ticker combinations for each day by doing a full join of the data on itself, keyed by date
+- remove instances where we had the same stock twice (corresponding to the diagonal of the correlation matrix)
+- remove instances where we have the complimentary pair of the same stocks, eg we only want one of APPL-GOOG and GOOG-APPL (this is equivalent to removing the upper or lower triangle of the correlation matrix)
+- use `slider::slide2_dbl` to do the rolling correlation calculation 
+- group by date and take the mean
+
+### Calculating returns
+
+The first step is straightforward - we simply calculate close-to-close returns and return a long dataframe of dates, tickers and returns:
+
+```{r, warning = FALSE}
+# calculate returns to each stock
+df <- prices_xlf %>%
+  group_by(ticker) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(return = close / dplyr::lag(close) - 1) %>%
+  select(date, ticker, return)
+
+# function for prettier web display
+pretty_table <- function(df) {
+  require(kableExtra)
+  
+  df %>%
+    kable() %>%
+    kable_styling(full_width = TRUE, position = 'center') %>%
+    scroll_box(height = '300px')
+}
+
+df %>%
+  head(50) %>%
+  pretty_table()
+```
+
+Next, we create a long dataframe of all the combinations for each day by doing a full join of the data on itself, by date.
+
+```{r}
+# combinations by date
+pairwise_combos <- df %>%
+  full_join(df, by = "date")  
+
+pairwise_combos %>%
+  na.omit() %>%
+  head(20) %>%
+  pretty_table()
+```
+
+So far so good. 
+
+Now we've got some wrangling to do. We want to remove instances where we have the same stock for `ticker.x` and `ticker.y`, which corresponds to the diagonal on the correlation matrix. 
+
+We also want to remove instances where we have the same stock, but with the `ticker.x` and `ticker.y` designations reversed. For instance, we only want one of APPL-GOOG and GOOG-APPL (this is equivalent to removing the upper or lower triangle of the correlation matrix).
+
+Note that we need to `ungroup` our dataframe (we grouped it earlier) - if we don't ungroup our variables, the grouping variable will be added back and thwart attempts to filter distinct cases.
+
+```{r}
+pairwise_combos <- pairwise_combos %>%
+  ungroup() %>%  # important!! 
+# drop diagonal 
+  filter(ticker.x != ticker.y) %>% 
+# remove duplicate pairs (eg A-AAL, AAL-A)
+  mutate(tickers = ifelse(ticker.x < ticker.y, glue("{ticker.x}, {ticker.y}"), glue("{ticker.y}, {ticker.x}"))) %>%
+  distinct(date, tickers, .keep_all = TRUE) 
+
+pairwise_combos %>%
+  na.omit() %>%
+  head(30) %>%
+  pretty_table()
+```
+
+Next, we'll use the brilliantly useful `slider` package and the function `slide2_dbl` to do the rolling correlation calculation (`slider` implements a number of rolling window calculation funtions - we'll explore it more in another post):
+
+```{r}
+period <- 60
+
+pairwise_corrs <- pairwise_combos %>%
+  group_by(tickers) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(rollingcor = slider::slide2_dbl(
+    .x = return.x, 
+    .y = return.y, 
+    .f = ~cor(.x, .y), 
+    .before = period, 
+    .complete = TRUE)
+    ) %>%
+  select(date, tickers, rollingcor)
+
+pairwise_corrs %>%
+  na.omit() %>%
+  head(30) %>%
+  pretty_table()
+```
+
+The syntax of `slide2_dbl` might look odd if it's the first time you've seen it, but it leverages the tidyverse's functional programming tools to repeatedly apply a function (given by `.f = ~cor(...)`) over windows of our data specified by `before` (number of prior periods to use in the window) and `complete` (whether to evaluate `.f` on complete windows only).
+
+The `~` notation might look odd too. In this case, it's used as shorthand for an anonymous function: `function(.x, .y) {cor(.x, .y)}`
+
+So our pipeline of operations above is exactly the same as this one:
+
+```{r, eval=FALSE}
+pairwise_corrs <- pairwise_combos %>%
+  group_by(tickers) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(rollingcor = slider::slide2_dbl(
+    .x = return.x, 
+    .y = return.y, 
+    .f = function(.x, .y) { cor(.x, .y) },  # long-hand anonymous function
+    .before = period, 
+    .complete = TRUE)
+    ) %>%
+  select(date, tickers, rollingcor)
+```
+
+Now, the other confusing things about this transformation are the seemingly inconsistent arguemnts in `slider2_dbl`: 
+
+- we designate a `.x` and a `.y` argument
+- but we also define a function with these arguments
+
+Actually, the `.x` and `.y` names are conventions used throughout the tidyverse to designate variables that are subject to non-standard evaluation (more on what that means in another post - it's not critical right now). In our `slide2_dbl` function, `.x` is passed as the first argument to `.f` and `.y` is passed as the second. 
+
+That means that we could equally write our transformation like this, and it would be equivalent:
+
+```{r, eval=FALSE}
+pairwise_corrs <- pairwise_combos %>%
+  group_by(tickers) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(rollingcor = slider::slide2_dbl(
+    .x = return.x, 
+    .y = return.y, 
+    .f = function(arg1, arg2) { cor(arg1, arg2) },  # the name of the args doesn't matter
+    .before = period, 
+    .complete = TRUE)
+    ) %>%
+  select(date, tickers, rollingcor)
+```
+
+Finally, to get the mean rolling correlation of the ETF constituents, we simply group by date and take the mean of the group:
+
+```{r}
+mean_pw_cors <- pairwise_corrs %>%
+  group_by(date) %>%
+  summarise(mean_pw_corr = mean(rollingcor, na.rm = TRUE))
+
+mean_pw_cors %>%
+  na.omit() %>%
+  ggplot(aes(x = date, y = mean_pw_corr)) +
+    geom_line() +
+    labs(
+      x = "Date",
+      y = "Mean Pairwise Correlation",
+      title = "Rolling Mean Pairwise Correlation",
+      subtitle = "XLF Constituents"
+    )
+```
+
+## Conclusion
+
+In this post we broke down our problem of calculating the rolling mean correlation of the constituents of an ETF into various chunks, and solved them one at a time to get the desired output. 
+
+The tidy data manipulation snippets we used here will be useful for doing similar transformations, such as rolling beta calculations, as well as single-variable rolling calculations such as volatility. 
+
+One problem that we glossed over here is that our largest dataframe - the one containing the pairwise combinations of returns - consisted of just under 3 million rows. That means we can easily do this entire piece of analysis in memory. 
+Things get slightly more difficult if we want to calculate the mean rolling correlation of the constituents of a larger ETF or index. 
+
+In another post, we'll solve this problem for the S&P 500 index. We'll also consider how the index has changed over time. 

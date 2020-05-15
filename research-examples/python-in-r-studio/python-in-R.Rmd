@@ -5,6 +5,10 @@ output:
     df_print: paged
 ---
 
+```{r, include=FALSE} 
+knitr::opts_chunk$set(fig.width = 9, fig.height = 5, fig.align = 'center')
+```
+
 Modern data science is fundamentally *multi-lingual.* At a minimum, most data scientists are comfortable working in R, Python and SQL; many add Julia and/or Scala to their toolkit, and it's not uncommon to also know one's way around JavaScript.
 
 Personally, I prefer to use R for data analysis, but until recently I'd tend to reach for Python for anything more general, like scraping web data or interacting with an API. Tools for doing this sort of thing in R's tidyverse are really maturing, so I'm doing more and more of this without leaving R. 

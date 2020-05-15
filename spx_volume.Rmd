@@ -11,6 +11,7 @@ First, we load some packages and some data that we extracted earlier. `spxprices
 
 ```{r, warning = FALSE}
 library(tidyverse)
+library(lubridate)
 library(glue)
 library(here)
 
@@ -88,6 +89,55 @@ mean_pw_cors %>%
 
 Blog:
 Illustrate problem doing it in base R. 64 million rows for a single year, gets whittled down to 32 million
+
+```{r}
+
+# split out into periods that overlap by lookback period
+# check that splits are correct
+# do each job, join at the end
+
+date_range <- prices_df %>%
+  summarise(start = min(date), end = max(date))
+corrs_per_day <- choose(500, 2)  # correlations to calculate per day per stock
+row_limit <- 50e6
+days_per_chunk <- row_limit/corrs_per_day
+  
+
+
+# calculate returns to each stock
+df <- prices_df %>%
+  group_by(ticker) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(return = close / dplyr::lag(close) - 1) %>%
+  select(date, ticker, return, inSPX)
+
+period <- 60
+
+df_subset <- df %>%
+  filter(date >= "2019-01-01", date < "2020-01-01") %>%  # try to do it on a single year
+
+# combinations by date, where both tickers are index members
+pairwise_combos <- df_subset %>%
+  full_join(df_subset, by = "date") %>%
+  filter(ticker.x != ticker.y, inSPX.x == TRUE, inSPX.y == TRUE) %>%
+  select(date, ticker.x, ticker.y, return.x, return.y)
+
+# remove duplicate pairs (eg A-AAL, AAL-A)
+pairwise_combos <- pairwise_combos %>%
+  ungroup() %>%  # this is a gotcha - if we don't ungroup our variables, the grouping variable will be added back and thwart attempts to filter distinct cases.
+  mutate(tickers = ifelse(ticker.x < ticker.y, glue("{ticker.x}, {ticker.y}"), glue("{ticker.y}, {ticker.x}"))) %>%
+  distinct(date, tickers, .keep_all = TRUE) 
+
+pairwise_corrs <- pairwise_combos %>%
+  group_by(tickers) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(rollingcor = slider::slide2_dbl(.x = return.x, .y = return.y, .f = ~cor(.x, .y), .before = period, .complete = TRUE)) %>%
+  select(date, tickers, rollingcor)
+
+mean_pw_cors <- pairwise_corrs %>%
+  group_by(date) %>%
+  summarise(mean_pw_corr = mean(rollingcor, na.rm = TRUE))
+```
 
 
 Some plots.....
