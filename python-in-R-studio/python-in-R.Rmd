@@ -1,0 +1,116 @@
+---
+title: "Python in R Studio"
+output:
+  html_document:
+    df_print: paged
+---
+
+Modern data science is fundamentally *multi-lingual.* At a minimum, most data scientists are comfortable working in R, Python and SQL; many add Julia and/or Scala to their toolkit, and it's not uncommon to also know one's way around JavaScript.
+
+Personally, I prefer to use R for data analysis, but until recently I'd tend to reach for Python for anything more general, like scraping web data or interacting with an API. Tools for doing this sort of thing in R's tidyverse are really maturing, so I'm doing more and more of this without leaving R. 
+
+But I also have a pile of Python scripts that I used to lean on, and it would be nice to be able to continue to leverage that past work. Other data scientists who work in bigger teams would likely have even more of a need to switch contexts regularly. 
+
+Well, thanks to the `reticulate` package (`install.packages('reticulate')`) and it's integration with R Studio, we can run our Python code without ever leaving the comfort of home. 
+
+Some useful features of `reticulate` include:
+
+-  Ability to call Python flexibly from within R: 
+  - sourcing Python scripts
+  - importing Python modules
+  - use Python interactively in an R sessions
+  - embed Python code in an R Markdown document
+- Direct object translation (eg `pandas.DataFrame`-`data.frame`, `numpy.array`-`matrix` etc)
+- Ability to bind to different Python environments 
+
+For me, the main benefit of `reticulate` is streamlining my workflow. In this post, I'll share an example. It's trivial and we could replace this Python script with R code in no time at all, but I'm sure you have more complex Python scripts that you don't feel like re-writing in R...
+
+## Scraping ETF Constituents with Python from R Studio
+
+I have a Python script, `download_spdr_holdings.py` for scraping ETF constituents from the SPDR website:
+
+```python
+"""download to csv file ETF holdings"""
+import pandas as pd
+
+def get_holdings(spdr_ticker):
+    
+    url = f'http://www.sectorspdr.com/sectorspdr/IDCO.Client.Spdrs.Holdings/Export/ExportCsv?symbol={spdr_ticker}'
+    df = pd.read_csv(url, skiprows=1).to_csv(f'{spdr_ticker}_holdings.csv', index=False)
+        
+    return df
+    
+    
+if __name__ == "__main__":
+    
+    tickers = ['XLB', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLU', 'XLV', 'XLY']
+    
+    for t in tickers:
+        get_holdings(t)
+```
+
+This simple script contains a function for saving the current constituents of a SPDR ETF to a csv file. When called as a module `python -m download_spdr_holdings`, the script loops through a bunch of ETF tickers and saves their constituents to individual CSV files. 
+
+The intent is that these CSV files then get read into an R session where any actual analysis takes place. 
+
+With `reticulate`, I can remove the disk I/O operations and read my data directly into my R session, using my existing Python script.
+
+First, I need to tell `reticulate` about the Python environment I want it to use. `reticulate` is smart enough to use the version of Python found on your `PATH` by default, but I have a Conda environment running Python 3.7 named "py37" that I'd like to use. Hooking `reticulate` into that environment is as easy as doing:
+
+```{r, warning = FALSE}
+library(reticulate)
+reticulate::use_condaenv("py37")
+```
+
+`reticulate` is flexible in its ability to hook into your various Python environments. In addition to `use_condaenv()` for Conda environments, there's `use_virtualenv()` for virtual environments and `use_python()` to specify a Python version that isn't on your `PATH`. 
+
+To use my Python script as is directly in R Studio, I could source it by doing `reticulate::source_python("download_spdr_holdings.py")`. This will cause the Python script to run as if it were called from the command line as a module, and will loop through all the tickers and save their constituents to CSV files as before. It will also add the function `get_holdings` to my R session, and I can call it as I would any R function. For instance `get_holdings('XLF')` will scrape the constituents of the XLF ETF and save them to disk. 
+
+Pretty cool, no?
+
+However, the point of this exercise was to skip the disk I/O operations and read the ETF constituents directly into my R session. So I would need to modify my Python `def` and call `source_python()` again. I could also just copy the modified `def` directly in an R Markdown notebook (I just need to specify my chunk as `{python}` rather than `{r}`:
+
+```{python}
+import pandas as pd
+
+def get_holdings(spdr_ticker):
+
+    """read in ETF holdings"""
+
+    url = f"http://www.sectorspdr.com/sectorspdr/IDCO.Client.Spdrs.Holdings/Export/ExportCsv?symbol={spdr_ticker}"
+    df = pd.read_csv(url, skiprows=1, usecols=[i for i in range(3)]) 
+    
+    return df
+
+```
+
+I now have the `get_holdings` function in my R session, and can call it as if it were an R function **attached to the `py` object** that `reticulate` creates to hold the Python session:
+
+```{r, warning = FALSE}
+library(tidyverse)
+
+xlf <- py$get_holdings('XLF')
+xlf %>%
+  arrange(desc(`Index Weight`)) %>%
+  head(10)
+
+```
+
+Notice that to use the `def` from the Python session embedded in my R session, I had to ask for it using `py$object_name` - this is different than if I sourced a Python file directly, in which case the Python function becomes available *directly* in the R session (ie I don't need `py$`).
+
+Importing Python modules with `reticulate::import()` produces the same behaviour:
+
+```{r}
+np <- import("numpy")
+
+np$array(list(c(1, 2, 3), c(4, 5, 6)))
+```
+Notice that my numpy array is created using R list objects in a manner analogous to Python lists: `np.array([[1, 2, 3], [4, 5, 6]])`.
+
+## REPL-ing Python in R Studio
+
+You can also open an interactive Python session within R by calling `reticulate::repl_python()`. Any objects created within the Python session are available in the R session via the `py` object. 
+
+## Conclusion
+
+If you want to leverage your existing Python scripts directly in your R Studio workflow, you can do so with `reticulate`, which embeds a Python session within an R session, and faciliates seamless interoperarability between objects created in the different contexts. 

@@ -1,0 +1,134 @@
+---
+title: "Rolling Correlation of SPX Constituents"
+output: html_notebook
+---
+
+Given a database of stock prices, how might we calculate rolling correlations between constituents of the S&P 500 index?
+
+For problems like this, the `tidyverse` really shines. There are a number of ways to solve this problem ... read on for our solution, and let us know if you'd approach it differently.
+
+First, we load some packages and some data that we extracted earlier. `spxprices.RData` contains a dataframe, `prices_df`, of S&P500 constituents and their daily prices. It also contains a boolean flag `inSPX` which defines whether the stock was in the index that month. (we prepared this upstream using BigQuery).
+
+```{r, warning = FALSE}
+library(tidyverse)
+library(glue)
+library(here)
+
+load(here::here("data", "spxprices.RData"))
+prices_df %>%
+  head()
+```
+
+We'd like to be able to calculate rolling average pairwise correlations between all the stocks (or subsets of them) in as tidy a way possible.
+
+That is, we would calculate the rolling pairwise correlation between all the stock combinations in the index and then take the mean of all those.
+
+Our general aproach was to:
+
+- calculating returns for each ticker 
+- create a long dataframe of all the combinations that were in the index for each day by doing a full join of the data on itself
+- remove instances where we had the same stock twice (corresponding to the diagonal of the correlation matrix)
+- remove instances where we have the same stock, but in different columns, eg we only want one of APPL-GOOG and GOOG-APPL (this is equivalent to removing the upper or lower triangle of the correlation matrix)
+- use `slider::slide2_dbl` to do the rolling correlation calculation 
+- group by date and take the mean
+
+We run into trouble trying to do the full join on all the data - the resulting object is about 15GB in size. 
+
+We'll solve that later, but for now we'll just take a sample of the price data and work with that.
+
+Here's the code for doing that:
+
+
+```{r}
+# calculate returns to each stock
+df <- prices_df %>%
+  # filter(ticker %in% c("A", "AAL", "AAP")) %>%
+  filter(date >= "2019-01-01", date < "2020-01-01") %>%  # try to do it on a single year
+  group_by(ticker) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(return = close / dplyr::lag(close) - 1) %>%
+  select(date, ticker, return, inSPX)
+
+# combinations by date, where both tickers are index members
+pairwise_combos <- df %>%
+  full_join(df, by = "date") %>%
+  filter(ticker.x != ticker.y, inSPX.x == TRUE, inSPX.y == TRUE) %>%
+  select(date, ticker.x, ticker.y, return.x, return.y)
+
+# remove duplicate pairs (eg A-AAL, AAL-A)
+pairwise_combos <- pairwise_combos %>%
+  ungroup() %>%  # this is a gotcha - if we don't ungroup our variables, the grouping variable will be added back and thwart attempts to filter distinct cases.
+  mutate(tickers = ifelse(ticker.x < ticker.y, glue("{ticker.x}, {ticker.y}"), glue("{ticker.y}, {ticker.x}"))) %>%
+  distinct(date, tickers, .keep_all = TRUE) 
+
+period <- 60
+
+pairwise_corrs <- pairwise_combos %>%
+  group_by(tickers) %>%
+  arrange(date, .by_group = TRUE) %>%
+  mutate(rollingcor = slider::slide2_dbl(.x = return.x, .y = return.y, .f = ~cor(.x, .y), .before = period, .complete = TRUE)) %>%
+  select(date, tickers, rollingcor)
+
+mean_pw_cors <- pairwise_corrs %>%
+  group_by(date) %>%
+  summarise(mean_pw_corr = mean(rollingcor, na.rm = TRUE))
+
+mean_pw_cors %>%
+  na.omit() %>%
+  ggplot(aes(x = date, y = mean_pw_corr)) +
+    geom_line() +
+    labs(
+      x = "Date",
+      y = "Mean Pairwise Correlation",
+      title = "Rolling Mean Pairwise Correlation",
+      subtitle = "SPX Constituents"
+    )
+  
+```
+
+Blog:
+Illustrate problem doing it in base R. 64 million rows for a single year, gets whittled down to 32 million
+
+
+Some plots.....
+
+```{r}
+pairwise_corrs %>%
+  na.omit() %>%
+  filter(tickers %in% c("A, AAL", "A, AAP", "AAL, AAP")) %>%
+  ggplot(aes(x = date, y = rollingcor, colour = tickers)) +
+    geom_line() +
+    labs(
+      x = "Date", 
+      y = glue("{period}-day rolling correlation"), 
+      title = "Rolling correlation of SPX constituents", 
+      colour = "Tickers"
+    ) +
+    theme_bw()
+
+p <- pairwise_corrs %>%
+  na.omit() %>%
+  filter(tickers %in% c("A, AAL", "A, AAP", "AAL, AAP")) %>%
+  ggplot(aes(x = date, y = rollingcor)) +
+    geom_line() +
+    facet_wrap(~tickers, ncol = 1) +
+    labs(
+      x = "Date", 
+      y = glue("{period}-day rolling correlation"), 
+      title = "Rolling correlation of SPX constituents" 
+    ) +
+    facet_wrap(~tickers, ncol = 1) +
+    theme_bw()
+
+p
+```
+
+
+```{r}
+library(showtext)
+font_add_google("Gochi Hand", "gochi")
+
+showtext_auto()
+p + theme_bw(base_family =  "gochi")
+```
+
