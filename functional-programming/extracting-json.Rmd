@@ -1,5 +1,5 @@
 ---
-title: "Tidy JSON Extraction with purrr"
+title: "How to Wrangle JSON Data in R with jsonlite, purr and dplyr"
 output: github_document
 always_allow_html: true
 ---

@@ -1,4 +1,4 @@
-Tidy JSON Extraction with purrr
+How to Wrangle JSON Data in R with jsonlite, purr and dplyr
 ================
 
 Here are some tools and recipes for working with JSON data in the
