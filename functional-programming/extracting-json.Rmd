@@ -1,24 +1,72 @@
 ---
-title: "Tidy JSON Extraction"
+title: "Tidy JSON Extraction with purrr"
 output: html_notebook
 ---
 
-Here are some tools and recipes for working with JSON data in the tidyverse. 
-
-```{r}
-library(tidyverse)
-library(here)
+```{r, include=FALSE}
+knitr::opts_chunk$set(fig.width = 11, fig.height = 5, fig.align = 'center') 
 ```
 
-## load json as nested named lists
+Here are some tools and recipes for working with JSON data in the tidyverse. 
 
-This data has been converted from raw JSON to nested named lists using `jsonlite::fromJSON`
+In particular, we'll use `purrr::map` functions to extract and transform our JSON data, and provide intuitive examples of the cross-overs and differences between `purrr` and `dplyr`. 
 
-```{r}
+```{r, warning=FALSE}
+library(tidyverse)
+library(here)
+library(kableExtra)
+
+pretty_print <- function(df, num_rows) {
+  df %>%
+  head(num_rows) %>%
+    kable() %>%
+    kable_styling(full_width = TRUE, position = 'center') %>%
+    scroll_box(height = '300px')
+}
+```
+
+## Load json as nested named lists
+
+This data has been converted from raw JSON to nested named lists using `jsonlite::fromJSON` with the `simplify` argument set to `FALSE` (that is, all elements are converted to named lists).
+
+The data consists of market data for SPY options with various strikes and expiries. We got it from a free trial of [Orats](https://info.orats.com/dataapi?hsCtaTracking=e95bffda-578d-41f2-93b6-7c2593c664ff%7C64874a9b-3a1d-4a10-b46a-9cf15fcb7543), whose data API I enjoy almost as much as their orange website. 
+
+You can load the data directly from the Orats API with the following code (just define your API key in the `ORATS_token` variable):
+
+```{r, eval=FALSE}
+library(httr)
+
+ORATS_token <- 'YOUR_KEY_HERE'
+res <- GET('https://api.orats.io/data/strikes?tickers=SPY', add_headers(Authorization = ORATS_token))
+
+if (http_type(res) == 'application/json') {
+  odata <- jsonlite::fromJSON(content(res, 'text'), simplifyVector = FALSE)
+} else {
+  stop('No json returned')
+}
+
+if (http_error(res)) {
+  stop(paste('API request error:',status_code(res), odata$message, odata$documentation_url))
+} 
+```
+
+Now, if you want to read this data directly into a nicely formatted dataframe, replace the line:   
+  
+`odata <- jsonlite::fromJSON(content(res, 'text'), simplifyVector = FALSE)`  
+  
+with 
+
+`odata <- jsonlite::fromJSON(content(res, 'text'), simplifyVector = TRUE, flatten = TRUE)`
+
+However, you should know that it isn't always possible to coerce JSON into nicely shaped dataframes this easily - often the raw JSON won't contain primitive types, or will have nested key-value pairs on the same level as your desired dataframe columns, to name a couple of obstacles. 
+
+In that case, it's useful to have some tools - like the ones in this post - for wrangling your source data.
+
+```{r, include=FALSE}
 strikes <- readRDS(here::here("data", "SPYstrikes.RDS"))
 ```
 
-## look inside
+## Look inside JSON lists
 
 ```{r}
 str(strikes, max.level = 1)  
@@ -44,6 +92,7 @@ strikes <- strikes[["data"]]
 ```
 
 ## How many observations do we have?
+
 ```{r}
 length(strikes)
 ```
@@ -62,7 +111,7 @@ strikes %>%
 
 We should also check the variable types are consistent as we need single types in each column of a dataframe (although R will warn if it is forced to coerce one type to another).
 
-Here's an interesting thing. It uses a nested map to get the variable types for each element of each sublist. They're actually not identical according to this:
+Here's an interesting thing. It uses a nested `purrr::map` to get the variable types for each element of each sublist. They're actually not identical according to this:
 
 ```{r}
 strikes %>%
@@ -70,11 +119,11 @@ strikes %>%
   unique() %>%
   length()
 ```
-After we make our dataframe, we should check that the variable types are as expected. 
+This is actually a little puzzling. Inspecting the individual objects suggests that we do have identical types. If anyone has anything to say about this, I'd love to hear about it in the comments. In any event, after we make our dataframe, we should check that the variable types are as expected. 
 
 Now, to that dataframe...
 
-`purrr::flatten` removes one level of hierarchy from a list (`unlist` removes them all). Here, `flatten` is applied to each sub-list in `strikes` via `purrr:map_df`. 
+`purrr::flatten` removes one level of hierarchy from a list (`unlist` removes them all). Here, `flatten` is applied to each sub-list in `strikes` via `purrr::map_df`. 
 
 We use the variant `flatten_df` which returns each sublist as a dataframe, which makes it compatible with `purrr::map_df`,which requires a function that returns a dataframe.
 
@@ -83,10 +132,15 @@ strikes_df <- strikes %>%
   map_df(flatten_df)
 
 strikes_df %>%
-  head(10)
+  pretty_print(30)
+
 ```
 
-## Some other interesting things
+## Cross-over and differences between `purrr` and `dplyr`
+
+Here are some other interesting things that we can do with the nested lists via `purrr`, and their equivalent operation on the `strikes_df` dataframe using `dplyr`. 
+
+The intent is to gain some intuition for `purrr` using what you already know about `dplyr`.
 
 ### Get vector of column names
 ```{r}
@@ -95,6 +149,16 @@ strikes %>%
   unique() %>%
   unlist()
 ```
+This is equivalent to the following `dplyr` operation on the `strikes_df` dataframe:
+
+```{r}
+strikes_df %>%
+  names
+```
+
+You can see the connection: `map(strikes, names)` applies `names` to each sublist in `strikes`, returning a list of names for each sublist, which we then check for a single unique case and convert to a charcter vector via `unlist`. 
+
+In the dataframe version, we've already mapped each sublist to a dataframe row. We can get the column names of the dataframe by calling `names` directly on this object. 
 
 ### Check that all elements have the same ticker
 
@@ -103,4 +167,129 @@ strikes %>%
   map_chr("ticker") %>%  # this makes a character vector of list elements "ticker"
   unique()
 ```
+Calling the `purrr::map` functions on a list with the name of a common sub-element returns the value associated with each sub-element. `map` returns a list; here we use `map_chr` to return a character vector. 
 
+This only works if the thing being returned from the sub-element is indeed a character. 
+
+This is equivalent to the following `dplyr` operation on the `strikes_df` dataframe:
+
+```{r}
+strikes_df %>%
+  distinct(ticker) %>%
+  pull()
+```
+
+In the `dplyr` dataframe version, we've already mapped our tickers to their own column. So we simply call `distinct` on that column to get the unique values. A `pull` converts the resulting tibble to a vector. 
+
+### Get the strike prices, expiries and call and put mid-prices
+
+In this case, the `purrr` solution is somewhat convoluted:
+
+```{r}
+callBids <- strikes %>%
+  map_dbl("callBidPrice")
+
+callAsks <- strikes %>%
+  map_dbl("callAskPrice")
+
+putBids <- strikes %>%
+  map_dbl("putBidPrice")
+
+putAsks <- strikes %>%
+  map_dbl("putAskPrice")
+
+data.frame(
+  strike = strikes %>% map_dbl("strike"),
+  expirDate = strikes %>% map_chr("expirDate"),
+  callMid = map2_dbl(.x = callBids, .y = callAsks, ~{(.x + .y)/2}),
+  putMid = map2_dbl(.x = putBids, .y = putAsks, ~{(.x + .y)/2})
+) %>%
+  pretty_print(10)
+  
+```
+
+Since our mapping function requires two inputs, we need to use the `map2` functions, and must set up the inputs as a first step. 
+
+The `dplyr` equivalent on the dataframe object is much more succinct:
+
+```{r}
+strikes_df %>%
+  mutate(
+    callMid = (callBidPrice + callAskPrice)/2,
+    putMid = (putBidPrice + putAskPrice)/2
+  ) %>%
+  select(strike, expirDate, callMid, putMid) %>%
+  pretty_print(10)
+```
+
+### Leverage the dataframe's structure
+
+We can also leverage the fact that a dataframe is represented as a list of columns to use `purrr` functions directly on dataframes. These recipes are quite useful for quickly getting to know a dataframe.
+
+For instance, we can get the type of each column:
+
+```{r}
+strikes_df %>%
+  map_chr(class)
+```
+
+Which is equivalent to a `dplyr::summarise_all`, except that this returns a tibble rather than a vector:
+
+```{r}
+strikes_df %>%
+  summarise_all(~class(.x)) 
+```
+
+We can also get the number of distinct values in each column using `purrr` functions:
+
+```{r}
+strikes_df %>%
+  map_dbl(n_distinct)
+```
+
+Again, this is equivalent to a `dplyr::summarise_all`, different return objects aside:
+
+```{r}
+strikes_df %>%
+  summarise_all(~n_distinct(.x))
+```
+
+If we wanted to put both of these things together, there's an elegant `purrr` solution:
+
+```{r, warning=FALSE}
+strikes_df %>%
+  map_df(
+    ~data.frame(num_distinct = n_distinct(.x), type = class(.x)),
+      .id = "variable"
+  )
+```
+
+But the best I can do with `dplyr` is somewhat less elegant:
+
+```{r}
+strikes_df %>%
+  summarise_all(
+    list(~n_distinct(.x), ~class(.x))
+  ) 
+```
+
+Intuitively, you'd reach for something like this:
+
+```{r}
+try(
+  strikes_df %>%
+    summarise_all(
+      ~data.frame(num_distinct = n_distinct(.x), type = class(.x))
+    )
+)
+```
+
+But we get an error related to the fact `summarise` wants to return a single value for each variable being summarised, that is, a dataframe with a single row.  
+
+There are probably better `dplyr` solutions out there, but this illustrates an important point: the `purrr::map` functions are highly customisable, able to apply a function to individual elements in a collection, returning a data object of your choosing. `dplyr::summarise` really shines when you need to aggregate or reduce variables to a single value. 
+
+## Conclusion
+
+In this post we explored the `purrr::map` functions for wrangling a data set consisting of nested lists, as you might have if you were reading in JSON data to R. 
+
+We also explored the cross-over and differences in use-cases for `purrr` and `dplyr` functions. 
