@@ -3,3 +3,5 @@
 .RData
 .Ruserdata
 research-examples/get-rich-quick/images
+**/scratch.R  # search in this directory and all subdriectories for scratch.R
+**/*.html*
