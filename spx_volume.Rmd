@@ -44,7 +44,8 @@ Here's the code for doing that:
 # calculate returns to each stock
 df <- prices_df %>%
   # filter(ticker %in% c("A", "AAL", "AAP")) %>%
-  filter(date >= "2019-01-01", date < "2020-01-01") %>%  # try to do it on a single year
+  # filter(date >= "2019-01-01", date < "2020-01-01") %>%  # try to do it on a single year
+  filter(inSPX == TRUE) %>%
   group_by(ticker) %>%
   arrange(date, .by_group = TRUE) %>%
   mutate(return = close / dplyr::lag(close) - 1) %>%
@@ -53,7 +54,7 @@ df <- prices_df %>%
 # combinations by date, where both tickers are index members
 pairwise_combos <- df %>%
   full_join(df, by = "date") %>%
-  filter(ticker.x != ticker.y, inSPX.x == TRUE, inSPX.y == TRUE) %>%
+  filter(ticker.x != ticker.y) %>%
   select(date, ticker.x, ticker.y, return.x, return.y)
 
 # remove duplicate pairs (eg A-AAL, AAL-A)
@@ -86,6 +87,17 @@ mean_pw_cors %>%
     )
   
 ```
+
+Possible solutions:
+- try gc() - why does this work?
+- preallocate vector of size - might work if other stuff fragments available memory
+- make more memory available to R by shutting other stuff down - but how big are R objects?
+- split data into managable chunks
+- parallelize chunks (but speed isn't the bottleneck)
+- spark
+- profvis
+
+
 
 Blog:
 Illustrate problem doing it in base R. 64 million rows for a single year, gets whittled down to 32 million

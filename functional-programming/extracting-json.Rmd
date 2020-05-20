@@ -1,0 +1,106 @@
+---
+title: "Tidy JSON Extraction"
+output: html_notebook
+---
+
+Here are some tools and recipes for working with JSON data in the tidyverse. 
+
+```{r}
+library(tidyverse)
+library(here)
+```
+
+## load json as nested named lists
+
+This data has been converted from raw JSON to nested named lists using `jsonlite::fromJSON`
+
+```{r}
+strikes <- readRDS(here::here("data", "SPYstrikes.RDS"))
+```
+
+## look inside
+
+```{r}
+str(strikes, max.level = 1)  
+```
+This tells us we have a component named "data". Let's look at that a little more closely:
+
+```{r}
+str(strikes$data, max.level = 1, list.len = 10)
+```
+
+This suggests we have homogenous lists of 40 elements each (an assumption we'll check shortly). 
+
+Let's look at one of those lists:
+
+```{r}
+str(strikes$data[[1]])
+```
+All these elements look like they can be easily handled. For instance, I don't see any more deeply nested lists, weird missing values, or anything else that looks difficult. 
+
+So now I'll pull out the interesting bit:
+```{r}
+strikes <- strikes[["data"]]
+```
+
+## How many observations do we have?
+```{r}
+length(strikes)
+```
+## Are all strike sublists identically named?
+
+This is where we'll check that our sublists are indeed homogeneously named, as we assumed above:
+
+```{r}
+strikes %>%
+  map(names) %>%  # this applies the base R function names to each sublist, and returns a list of lists with the output
+  unique() %>%
+  length() == 1
+```
+
+## Make a dataframe
+
+We should also check the variable types are consistent as we need single types in each column of a dataframe (although R will warn if it is forced to coerce one type to another).
+
+Here's an interesting thing. It uses a nested map to get the variable types for each element of each sublist. They're actually not identical according to this:
+
+```{r}
+strikes %>%
+  map(.f = ~{map_chr(.x, .f = class)}) %>%
+  unique() %>%
+  length()
+```
+After we make our dataframe, we should check that the variable types are as expected. 
+
+Now, to that dataframe...
+
+`purrr::flatten` removes one level of hierarchy from a list (`unlist` removes them all). Here, `flatten` is applied to each sub-list in `strikes` via `purrr:map_df`. 
+
+We use the variant `flatten_df` which returns each sublist as a dataframe, which makes it compatible with `purrr::map_df`,which requires a function that returns a dataframe.
+
+```{r}
+strikes_df <- strikes %>%
+  map_df(flatten_df)
+
+strikes_df %>%
+  head(10)
+```
+
+## Some other interesting things
+
+### Get vector of column names
+```{r}
+strikes %>%
+  map(names) %>%
+  unique() %>%
+  unlist()
+```
+
+### Check that all elements have the same ticker
+
+```{r}
+strikes %>%
+  map_chr("ticker") %>%  # this makes a character vector of list elements "ticker"
+  unique()
+```
+
