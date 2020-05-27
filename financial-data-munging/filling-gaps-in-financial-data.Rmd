@@ -1,0 +1,121 @@
+---
+title: "How to Deal with Gaps in Large Stock Data Universes"
+output: html_notebook
+---
+
+When you're working with large universes of stock data you'll come across a lot of challenges:
+
+* Stocks pay dividends and other distributions that have to be accounted for
+* Stocks are subject to splits and other corporate actions which have to be accounted for
+* New stocks are listed all the time - you won't have as much history for these stocks for other stocks
+* Stocks are delisted, and many datasets do not include the price history of delisted stocks
+* Stocks can be suspended or halted for a period of time, leading to trading gaps.
+* Companies grow and shrink: the "top 100 stocks by market cap" in 1990 looks very different to the same group in 2020; "growth stocks" in 1990 look very different to "growth stocks" in 2020 etc.
+
+The challenges are well understood, but dealing with them is not always straightforward.
+
+One significant challenge is gaps in data.
+
+Quant analysis gets very hard if you have missing or misaligned data. 
+
+If you're working with a universe of 1,000 stocks life is a lot easier if you have an observation for each stock for each trading date, regardless of whether it actually traded that day. That way:
+
+* you can always do look-ups by date
+* any grouped aggregations or rolling window aggregations will be operating on the date range for every ticker
+* you can easily sense check the size of your data to have `trading_days * number_of_stocks` rows.
+
+If you work with "wide" matrix-like data, these challenges are obvious because you have one row for every date in your data set, and the columns represent an observation for each ticker.
+
+We usually work with long or "tidy" data - where each observation is an observation for a stock for a given day.
+
+How do we work productively in this data, whilst still ensuring that we fill in any gaps in our long data with NAs?
+
+I'll show you a trick...
+
+First, here's some dummy data to illustrate the problem:
+
+```{r}
+library(tidyverse)
+testdata <- tibble(date = c(1,1,2,2,2,3,3),
+                       ticker = c('AMZN','FB','AMZN','FB','TSLA','AMZN','TSLA'),
+                       returns = 1:7 / 100)
+testdata
+```
+
+* TSLA is missing from date 1 as it only started trading after the others
+* FB is missing from date 3 as it was put on trading halt after Citron Research hacked into Zuck's memory banks.
+
+Ideally we want a row for every date for every stock - with returns set to NA in the case where data is missing. 
+
+That way we can always look up a price by date. And we can always be sure that any grouped operations by ticker return the same size data set.
+
+The trick is as follows:
+
+* use `pivot_wide` to reshape the data to row per date, with a column for each stock
+* use `pivot_long` to reshape it back to its longer format.
+
+Let's do it step by step...
+
+First, we make it wide:
+
+```{r}
+widedata <- testdata %>%
+  pivot_wider(id_cols = date, names_from = ticker, values_from = returns)
+
+widedata
+```
+
+Where we had missing rows, we now have NAs.
+
+Now we make it long again:
+
+```{r}
+tidydata <- widedata %>%
+  pivot_longer(-date, names_to = 'ticker', values_to =  'returns')
+
+tidydata
+```
+
+Now we have a row for every date for every stock.
+
+Now we can safely do grouped aggregations by ticker, on the understanding that the data is the same size for all tickers, and we've removed one large source of potential analysis screw-up...
+
+```{r}
+tidydata %>%
+  group_by(ticker) %>%
+  summarise(count = n())
+```
+
+Here's the complete pipeline:
+
+```{r}
+testdata %>%
+  pivot_wider(id_cols = date, names_from = ticker, values_from = returns) %>%
+  pivot_longer(-date, names_to = 'ticker', values_to =  'returns')
+```
+
+
+## What if we have more than one variable in our orignal data?
+
+One of the benefits of working with longer "tidy" data, is that we can have multiple variables per date/stock observation. 
+
+```{r}
+testwider <- testdata %>%
+  mutate(volume = 100:106,
+         otherfeature = 200:206)
+
+testwider
+```
+
+In this case, we do the following:
+
+* use `pivot_wide` to reshape the data to row per date, with a column for each stock
+* use `pivot_long` to reshape it back to its longer format
+* use `left_join` to recover the rest of the variables from the original data.
+
+```{r}
+testwider %>%
+  pivot_wider(id_cols = date, names_from = ticker, values_from = returns) %>%
+  pivot_longer(-date, names_to = 'ticker', values_to =  'returns') %>%
+  left_join(testwider, by = c('date', 'ticker', 'returns'))
+```

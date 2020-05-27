@@ -1,0 +1,41 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, bigrquery, here)
+```
+
+Get historic SPX consituents...
+
+```{r}
+historicalspx <- readRDS(here::here('historical-spx-constituents', 'historicalSPX.RDS'))
+```
+
+```{r}
+BQ_PROJ <- 'rw-algotrader'
+BQ_DS <- 'bootcamp'
+
+ds <- bq_dataset(BQ_PROJ, BQ_DS)
+tb <- bq_table(BQ_PROJ, BQ_DS, 'historicalspx')
+
+if(!bq_table_exists(tb)) {
+  tb <- bq_table_create(
+    tb,
+    fields = historicalspx,
+    friendly_name = 'Historical SPX constituents'
+  )
+  bq_table_upload(tb, historicalspx)
+}
+```
+
+>   bq_table_upload(tb, historicalspx)
+Running job 'rw-algotrader.job_mmrfa-osy3MDoahuNm5-X10v5l2e.US' [|]  3s
+Complete
+Input:  11.72 MB
+Output: 5.77 MB
+
+
+

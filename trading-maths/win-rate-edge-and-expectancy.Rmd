@@ -1,0 +1,431 @@
+---
+title: "Win Rate, Edge and Expectancy"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(slider)
+```
+
+Let's say you have a small but persistent edge in an equity trade.
+
+Your trade is a winner 50% of the time, but when you win you win 2% and when you lose you lose -1.8%.
+
+Imagine you could make an unlimited number of these trades. 
+
+What is the amount you expect to win, in the long run, on each trade you make?
+
+```{r}
+win_rate <- 0.5
+win_pnl <- 0.02
+loss_pnl <- -0.018
+
+expectation <- (win_rate * win_pnl) + ((1 - win_rate) * loss_pnl)
+expectation * 100
+```
+
+So the expectation of our trade here is 0.1%
+
+Every time we bet $100 on the trade, we can expect to make 0.1% on average.
+
+Let's simulate making 1000 of these trades and see what it looks like.
+
+You don't need to understand anything about probability distributions to make simulations like this. 
+
+We can just roll a digital dice 1000 times, and simulate the outcome from the trade based on the value of that dice.
+
+(That's not always the most efficient way of doing things, but it always works. And that's what matters)
+
+Here we "roll a digital dice", simulating uniformly distributed random numbers between 0 an 1.
+
+```{r}
+trials <- 1000
+dicerolls <- runif(trials, 0, 1)
+head(dicerolls)
+```
+
+(We only show the first 5 "dice rolls" here)
+
+In this setup, we have equal chance of a trade being a winner or a loser, so let's say that every roll >= 0.5000 represents a winner, and every roll < 0.5000 represents a loser.
+
+```{r}
+tradeoutcomes <- tibble(wins = dicerolls >= 0.5)
+
+tradeoutcomes %>%
+  group_by(wins) %>%
+  summarise(occurences = n())
+```
+
+TODO: fix random seed and talk about it...
+
+Let's now calculate the P&L of each trade
+
+```{r}
+tradeoutcomes <- tradeoutcomes %>%
+  mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+
+tradeoutcomes
+```
+
+Remember that, over the long run, we expect our edge per trade to be 0.1%.
+
+So we'd expect the mean of our pnls to be close to 0.1%. If it is larger we got lucky over those 1000 trade. If it is smaller then we got unlucky.
+
+```{r}
+tradeoutcomes %>%
+  summarise(meantradepnl = mean(pnl) * 100)
+```
+
+Interesting... our actual expectation was quite different to what we expect over the long run... 
+
+And 1,000 trades seems like a lot of trades too.
+
+Let's run it with 10,000 trades, 10x the precious number...
+
+
+```{r}
+trials <- 10000
+dicerolls <- runif(trials, 0, 1)
+tradeoutcomes <- tibble(wins = dicerolls >= 0.5) %>%
+  mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+
+tradeoutcomes %>%
+  summarise(meantradepnl = mean(pnl) * 100)
+```
+
+Now we're starting to converge on our true expectation... 
+
+To keep this visual and intuitive let's plot the "equity curve" from that trading strategy, assuming we bet $100 stakes on each trade.
+
+```{r}
+tradeoutcomes %>%
+  mutate(trade = row_number()) %>%
+  mutate(equity = cumsum(pnl * 100)) %>%
+  ggplot(aes(x = trade, y = equity)) + 
+    geom_line() +
+    ggtitle('Equity Curve of Equal Stake Bet')
+  
+```
+
+Very nice... Just for fun, let's calculate the Sharpe Ratio of that pretend strategy assuming we can place a trade every day. 
+
+```{r}
+library(tidyquant)
+tradeoutcomes %>%
+  mutate(date = seq.Date(as.Date('2000-01-01'), by = 'days', length.out = nrow(tradeoutcomes))) %>%
+  tq_performance(Ra = pnl, performance_fun = SharpeRatio)
+```
+
+
+So, how quickly do we converge on our true edge here?
+
+Let's look at that...
+
+To do this we're going to imagine that we can run parallel universe simulations.
+
+We're going to create 10 parallel universes, and in each one, we're going to simulate 10,000 trades.
+
+```{r}
+universes <- 1:10
+trials <- 10000
+
+parallelruns <- universes %>%
+  map_df(function(x) {
+    dicerolls <- runif(trials, 0, 1)
+    tibble(universe = x, wins = dicerolls >= 0.5) %>%
+    mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+  })
+
+# Check that we have 10,000 trades in each universe, and display the mean return over all trades
+parallelruns %>%
+  group_by(universe) %>%
+  summarise(count = n(), meanpnl = mean(pnl))
+```
+
+We want to observe how our edge converges to it's expected value, so we're going to run an expanding window calculation over the data and plot the mean pnl. 
+
+TODO: Explain better.
+
+```{r}
+parallelruns %>%
+  mutate(universe = factor(universe)) %>% 
+  group_by(universe) %>%
+  mutate(tradenum = row_number()) %>%
+  mutate(expandingedge = slider::slide_dbl(pnl, mean, .before = Inf) * 100) %>%
+  ggplot(aes(x=tradenum, y = expandingedge, color = universe)) +
+    geom_line() + 
+    geom_hline(yintercept = 0.1)
+```
+
+What do we notice...
+
+For any a small number of trades, luck absolutely dominates. Let's zoom into the first 1000 and last 9,000 trades...
+
+```{r}
+parallelruns %>%
+  mutate(universe = factor(universe)) %>% 
+  group_by(universe) %>%
+  mutate(tradenum = row_number()) %>%
+  mutate(trades = case_when(tradenum <= 1000 ~ '1-1000', TRUE ~ '1001-10000')) %>%
+  mutate(expandingedge = slider::slide_dbl(pnl, mean, .before = Inf) * 100) %>%
+  group_by(trades) %>%
+  ggplot(aes(x=tradenum, y = expandingedge, color = universe)) +
+    geom_line() + 
+    geom_hline(yintercept = 0.1) + 
+    facet_wrap(~trades, scales = 'free')
+```
+
+
+We're slowly converging on the true edge... but we still see a wide range of outcomes...
+
+
+# What Happens If I Have a Bigger Edge?
+
+In this trade, we had an expectation of 0.1% per trade.
+
+Let's make that significantly bigger, at 0.5% per trade.
+
+We'll simulate that as a process in which:
+ - The probability of a winning trade is 50%
+ - Winning trades make 3%
+ - Losing trades lose -2%
+
+(That's a massive edge if we're going to trade as much as we do in these simulations...)
+
+Let's see what happens, if we pl
+
+```{r}
+win_rate <- 0.5
+win_pnl <- 0.03
+loss_pnl <- -0.02
+
+expectation <- (win_rate * win_pnl) + ((1 - win_rate) * loss_pnl)
+expectation * 100
+```
+
+```{r}
+trials <- 10000
+dicerolls <- runif(trials, 0, 1)
+tradeoutcomes <- tibble(wins = dicerolls <= win_rate) %>%
+  mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+
+tradeoutcomes %>%
+  mutate(trade = row_number()) %>%
+  mutate(equity = cumsum(pnl * 100)) %>%
+  ggplot(aes(x = trade, y = equity)) + 
+    geom_line() +
+    ggtitle('Equity Curve of Equal Stake Bet - Massive Edge')
+  
+```
+
+There you go... That's an HFT-like edge for you there... 
+
+Let's run the parallel universe simulation again and see how long it takes for the edge to converge to its long term expected value of 0.5% per trade.
+
+```{r}
+universes <- 1:10
+trials <- 10000
+
+parallelruns <- universes %>%
+  map_df(function(x) {
+    dicerolls <- runif(trials, 0, 1)
+    tibble(universe = x, wins = dicerolls <= win_rate) %>%
+    mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+  })
+
+parallelruns %>%
+  mutate(universe = factor(universe)) %>% 
+  group_by(universe) %>%
+  mutate(tradenum = row_number()) %>%
+  mutate(trades = case_when(tradenum <= 1000 ~ '1-1000', TRUE ~ '1001-10000')) %>%
+  mutate(expandingedge = slider::slide_dbl(pnl, mean, .before = Inf) * 100) %>%
+  group_by(trades) %>%
+  ggplot(aes(x=tradenum, y = expandingedge, color = universe)) +
+    geom_line() + 
+    geom_hline(yintercept = 0.5) + 
+    facet_wrap(~trades, scales = 'free')
+```
+
+Because the win rate is the same, it still takes about the same amount of time to converge to the expectation of the trade.
+
+TODO: Explain better 
+
+# What happens if we increase the win rate...
+
+Many retail traders, especially options trades, TODO
+
+
+Now we're going to model the original trade as one where:
+
+* the chance of winning is 95%
+* you make 1% on a winning trade
+* you lose 17% on a losing trade
+
+(Note this is also just a more volatile trade.)
+
+
+```{r}
+win_rate <- 0.95
+win_pnl <- 0.01
+loss_pnl <- -0.17
+
+expectation <- (win_rate * win_pnl) + ((1 - win_rate) * loss_pnl)
+expectation * 100
+```
+
+```{r}
+trials <- 10000
+dicerolls <- runif(trials, 0, 1)
+tradeoutcomes <- tibble(wins = dicerolls <= win_rate) %>%
+  mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+
+tradeoutcomes %>%
+  mutate(trade = row_number()) %>%
+  mutate(equity = cumsum(pnl * 100)) %>%
+  ggplot(aes(x = trade, y = equity)) + 
+    geom_line() +
+    ggtitle('Equity Curve - Negatively skewed trade with 0.l% expectation per trade')
+```
+
+```{r}
+universes <- 1:10
+trials <- 10000
+
+parallelruns <- universes %>%
+  map_df(function(x) {
+    dicerolls <- runif(trials, 0, 1)
+    tibble(universe = x, wins = dicerolls <= win_rate) %>%
+    mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+  })
+
+parallelruns %>%
+  mutate(universe = factor(universe)) %>% 
+  group_by(universe) %>%
+  mutate(tradenum = row_number()) %>%
+  mutate(trades = case_when(tradenum <= 1000 ~ '1-1000', TRUE ~ '1001-10000')) %>%
+  mutate(expandingedge = slider::slide_dbl(pnl, mean, .before = Inf) * 100) %>%
+  group_by(trades) %>%
+  ggplot(aes(x=tradenum, y = expandingedge, color = universe)) +
+    geom_line() + 
+    geom_hline(yintercept = 0.1) + 
+    facet_wrap(~trades, scales = 'free')
+```
+
+Here we see it takes much longer to converge to the true value. TODO. 
+
+Let's wrap this and visualise the effect in a nicer way... 
+
+We're going to create 
+
+
+Testing out thing that looks at vols etc...
+
+```{r}
+trials <- 1000000
+tradeexpectation <- 0.001
+win_rate <- 0.9
+win_pnl <- 0.00729
+loss_pnl <- ((win_rate * win_pnl) - tradeexpectation) / (win_rate - 1)
+dicerolls <- runif(trials, 0, 1)
+tradeoutcomes <- tibble(wins = dicerolls <= win_rate) %>%
+  mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+
+loss_pnl * 100
+mean(tradeoutcomes$pnl) * 100
+sd(tradeoutcomes$pnl) * 100
+```
+
+Look at the following strategies with the same expectation, similar per-trade volatility but different win rates.
+
+```{r}
+strategies <- tibble(
+  win_rate = seq(0.1, 0.9, 0.1),
+  win_pnl = c(5.8, 3.9, 3.00230, 2.42702, 2, 1.65134, 1.34384, 1.05, 0.73333) / 100,
+  loss_pnl = c(-0.53333, -0.850000, -1.14384, -1.45134, -1.8, -2.22702, -2.80230, -3.7, -5.6) / 100
+)
+strategies
+```
+
+I put these together so they have the same expectation per trade of 0.1%, as well as having a similar per trade volatility. 
+
+So let's check that. 
+
+We estimate per trade volatility as `win_rate * win_pnl^2 + loss_pnl * loss_pnl^2`
+
+```{r}
+strategies %>%
+  mutate(trade_expectation = (win_rate * win_pnl) + ((1 - win_rate) * loss_pnl),
+         vol_proxy = (win_rate * win_pnl^2) + ((1 - win_rate) * loss_pnl^2))
+```
+
+We look pretty good.
+
+Now let's run these strategies through our parallel universe simulation, this time running 100 different parallel universes...
+
+```{r}
+trials <- 10000
+num_universes <- 100
+universes <- rep(1:num_universes, each = nrow(strategies)) 
+win_rates <- rep(strategies$win_rate, num_universes)
+win_pnl <- rep(strategies$win_pnl, num_universes)
+loss_pnl <- rep(strategies$loss_pnl, num_universes)
+
+arglist <- list(universes, win_rates, win_pnl, loss_pnl)
+
+parallelruns <- arglist %>%
+  pmap_dfr(function(universe, win_rate, win_pnl, loss_pnl) {
+    dicerolls <- runif(trials, 0, 1)
+    tibble(universe = universe, win_rate = win_rate, wins = dicerolls <= win_rate) %>%
+    mutate(pnl = case_when(wins ~ win_pnl, TRUE ~ loss_pnl))
+  })
+```
+
+Now we have a bunch of pnls
+
+Let's check the summary characteristics of the strategies
+
+```{r}
+parallelruns %>%
+  group_by(win_rate) %>%
+  summarise(tradeexpectation = mean(pnl),
+            tradesd = sd(pnl))
+```
+
+Great... Looks like all our strategies have the same per-trade expected returns and per-trade standard deviation of returns.
+
+The strategies only materially differ in the win_rate - the skew of the pnl.
+
+We're interested in how quickly the per-trade strategy returns converge to their expected value.
+
+We're going to calculate the mean of the trade returns on an expanding window. Then we'll calculate the difference between the top and bottom performing of the 100 strategies. And we'll plot that against the number of trades.
+
+```{r}
+# This takes a long time
+rolls <- parallelruns %>%
+  mutate(universe = factor(universe),
+         win_rate = factor(win_rate)) %>%
+  group_by(universe, win_rate) %>%
+  mutate(expandingedge = slider::slide_dbl(pnl, mean, .before = Inf))
+  
+saveRDS(rolls, 'rolls.RDS') 
+
+rolls100 <- rolls %>%
+  group_by(universe, win_rate) %>%
+  # sample only every 100th record
+  mutate(tradenum = row_number()) %>%
+  filter(tradenum %% 100 == 0) %>%
+  ungroup()
+
+edgerange <- rolls100 %>%
+  group_by(win_rate, tradenum) %>%
+  summarise(min_edge = min(expandingedge),
+            max_edge = max(expandingedge)) %>%
+  mutate(edge_range = max_edge - min_edge)
+
+edgerange %>% 
+  filter(tradenum <= 1000) %>%
+  ggplot(aes(x=tradenum, y = edge_range, color = win_rate)) + geom_line() 
+
+
+```
