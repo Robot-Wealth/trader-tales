@@ -1,6 +1,7 @@
 ---
 title: "Performant R Programming: Profiling with profvis"
-output: html_notebook
+output: github_document
+always_allow_html: true
 ---
 
 ```{r, include=FALSE} 
@@ -92,7 +93,7 @@ Getting simple timings as a basic measure of performance is straightforward.
 
 We'll start by timing our code for calculating mean rolling pairwise correlations using `microbenchmark`.
 
-First we load our packages and data:
+First we load our packages and data (you can get the data from our GitHub repository - which if you clone will enable you to run the relevant Rmd document directly). It consists of prices for SPX constituents since 2015; we filter on a flag we added to indicate whether a particular stock was in the index on a particular date:
 
 ```{r, warning=FALSE}
 library(tidyverse)
@@ -104,6 +105,8 @@ library(profvis)
 theme_set(theme_bw())
 
 load(here::here("data", "spxprices_2015.RData"))
+spx_prices <- spx_prices %>%
+  filter(inSPX ==TRUE)
 ```
 
 Next we "functionise" the steps in our pipeline of operations. This will make profiling more straightforward, and the output of `microbenchmark` easier to interpret:
@@ -229,9 +232,9 @@ profvis({
 
 The graphical output shows the time spent on each line of code in milliseconds. The graph is interactive - you can zoom and move around to get better views. 
 
-You can also see each line of code and the memory allocated and deallocatd (negative values), and the time spent on each line:
+You can also see each line of code and the memory allocated and deallocated (negative values), and the time spent on each line:
 
-
+![profiling output](https://github.com/Robot-Wealth/r-quant-recipes/blob/master/performant-r/images/profvis_out.png)
 
 We can see that the vast majority of time was spent in the `pairwise_corrs` function, and that it allocated about 18.5GB of memory. 
 

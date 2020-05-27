@@ -1,13 +1,14 @@
 ---
 title: "How to Deal with Gaps in Large Stock Data Universes"
-output: html_notebook
+output: github_document 
+always_allow_html: true
 ---
 
-When you're working with large universes of stock data you'll come across a lot of challenges:
+When you're working with [large universes of stock data](https://robotwealth.com/how-to-get-historical-spx-constituents-data-for-free/) you'll come across a lot of challenges:
 
-* Stocks pay dividends and other distributions that have to be accounted for
-* Stocks are subject to splits and other corporate actions which have to be accounted for
-* New stocks are listed all the time - you won't have as much history for these stocks for other stocks
+* Stocks pay dividends and other distributions that have to be accounted for.
+* Stocks are subject to splits and other corporate actions which also have to be accounted for.
+* New stocks are listed all the time - you won't have as much history for these stocks as for other stocks.
 * Stocks are delisted, and many datasets do not include the price history of delisted stocks
 * Stocks can be suspended or halted for a period of time, leading to trading gaps.
 * Companies grow and shrink: the "top 100 stocks by market cap" in 1990 looks very different to the same group in 2020; "growth stocks" in 1990 look very different to "growth stocks" in 2020 etc.
@@ -26,11 +27,11 @@ If you're working with a universe of 1,000 stocks life is a lot easier if you ha
 
 If you work with "wide" matrix-like data, these challenges are obvious because you have one row for every date in your data set, and the columns represent an observation for each ticker.
 
-We usually work with long or "tidy" data - where each observation is an observation for a stock for a given day.
+We usually work with [long or "tidy" data](https://robotwealth.com/financial-data-manipulation-in-dplyr-for-quant-traders/) - where each observation is an observation for a stock for a given day.
 
 How do we work productively in this data, whilst still ensuring that we fill in any gaps in our long data with NAs?
 
-I'll show you a trick...
+The tidyverse makes this very straightforward. Let me show you!
 
 First, here's some dummy data to illustrate the problem:
 
@@ -43,16 +44,40 @@ testdata
 ```
 
 * TSLA is missing from date 1 as it only started trading after the others
-* FB is missing from date 3 as it was put on trading halt after Citron Research hacked into Zuck's memory banks.
+* FB is missing from date 3 as it was put on trading halt after Citron Research hacked into Zuck's memory banks
 
 Ideally we want a row for every date for every stock - with returns set to NA in the case where data is missing. 
 
 That way we can always look up a price by date. And we can always be sure that any grouped operations by ticker return the same size data set.
 
-The trick is as follows:
+Turns out that the `tidyr::complete` function is exactly what we're looking for. It turns *implicit* missing values - like the returns for TSLA on date 1 and FB on date 3 - into *explicit* missing values:
 
-* use `pivot_wide` to reshape the data to row per date, with a column for each stock
-* use `pivot_long` to reshape it back to its longer format.
+```{r}
+tidydata <- testdata %>%
+  complete(date, ticker)
+
+tidydata
+```
+Easy!
+
+Now we have a row for every date for every stock.
+
+Now we can safely do grouped aggregations by ticker, on the understanding that the data is the same size for all tickers, and we've removed one large source of potential analysis screw-up...
+
+```{r}
+tidydata %>%
+  group_by(ticker) %>%
+  summarise(count = n())
+```
+
+### Another approach
+
+There's also a more verbose way to achieve our aim, and I'm showing it here because I think it's useful to see how different functions and libraries connect and cross-over in the tidyverse (right now I'm fascinated by the intersection of the `purrr::map` functions and the `dplyr::summarise_if, _at, _all` functions...but that's a story for another time).
+
+The verbose approach is as follows:
+
+* use `tidyr::pivot_wide` to reshape the data to row per date, with a column for each stock
+* use `tidyr::pivot_long` to reshape it back to its longer format.
 
 Let's do it step by step...
 
@@ -65,7 +90,7 @@ widedata <- testdata %>%
 widedata
 ```
 
-Where we had missing rows, we now have NAs.
+Where we had missing rows, we now have `NA`.
 
 Now we make it long again:
 
@@ -76,9 +101,7 @@ tidydata <- widedata %>%
 tidydata
 ```
 
-Now we have a row for every date for every stock.
-
-Now we can safely do grouped aggregations by ticker, on the understanding that the data is the same size for all tickers, and we've removed one large source of potential analysis screw-up...
+And again we have a row for every date for every stock.
 
 ```{r}
 tidydata %>%
@@ -97,7 +120,7 @@ testdata %>%
 
 ## What if we have more than one variable in our orignal data?
 
-One of the benefits of working with longer "tidy" data, is that we can have multiple variables per date/stock observation. 
+One of the benefits of working with [longer "tidy" data](https://robotwealth.com/financial-data-manipulation-in-dplyr-for-quant-traders/) is that we can have multiple variables per date/stock observation. 
 
 ```{r}
 testwider <- testdata %>%
@@ -106,8 +129,16 @@ testwider <- testdata %>%
 
 testwider
 ```
+Again, we're missing data for TSLA on date 1 and FB on date 3, but now we're also missing `volume` and `otherfeature` in addition to `returns`. 
 
-In this case, we do the following:
+To use `complete`, nothing changes from earlier:
+
+```{r}
+testwider %>%
+  complete(date, ticker)
+```
+
+However if we want to pivot back and forth, we do the following:
 
 * use `pivot_wide` to reshape the data to row per date, with a column for each stock
 * use `pivot_long` to reshape it back to its longer format
@@ -119,3 +150,21 @@ testwider %>%
   pivot_longer(-date, names_to = 'ticker', values_to =  'returns') %>%
   left_join(testwider, by = c('date', 'ticker', 'returns'))
 ```
+
+## Conclusions
+
+- Missing values in financial data threaten the validity of quant analysis due to inadvertent misalignment 
+- Wide data tends to highlight such missing data
+- Long data tends to hide it 
+- `tidyr::complete` is a succinct and efficient way to ensure that missing observations are accounted for with `NA`
+- Like most tasks in R, there is more than one way to go about it. But `complete` should be your go-to function.
+
+## Want all the code?
+
+All the code in this post is available in our [github repo](https://github.com/Robot-Wealth/r-quant-recipes/tree/master/financial-data-munging) where you can find lots of other recipes and tools to make your life as a quant researcher easier.
+
+## If you liked this you'll probably like these too...
+
+- [Finanical Manipulation in dplyr for Quant Traders](https://robotwealth.com/financial-data-manipulation-in-dplyr-for-quant-traders/)
+- [Handling a Large Universe of Stock Price Data in R and Profiling with profvis](https://robotwealth.com/handling-a-large-universe-of-stock-price-data-in-r-profiling-with-profvis/)
+- [Rolling Mean Correlations in the tidyverse](https://robotwealth.com/rolling-mean-correlations-in-the-tidyverse/)
