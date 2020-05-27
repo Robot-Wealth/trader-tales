@@ -1,6 +1,7 @@
 ---
 title: "Rolling Correlation of SPX Constituents"
-output: html_notebook
+output: github_document 
+always_allow_html: true
 ---
 
 Given a database of stock prices, how might we calculate rolling correlations between constituents of the S&P 500 index?
@@ -24,7 +25,7 @@ We'd like to be able to calculate rolling average pairwise correlations between 
 
 That is, we would calculate the rolling pairwise correlation between all the stock combinations in the index and then take the mean of all those.
 
-Our general aproach was to:
+Our general approach was to:
 
 - calculating returns for each ticker 
 - create a long dataframe of all the combinations that were in the index for each day by doing a full join of the data on itself
@@ -92,7 +93,7 @@ Possible solutions:
 - try gc() - why does this work?
 - preallocate vector of size - might work if other stuff fragments available memory
 - make more memory available to R by shutting other stuff down - but how big are R objects?
-- split data into managable chunks
+- split data into manageable chunks
 - parallelize chunks (but speed isn't the bottleneck)
 - spark
 - profvis

@@ -1,8 +1,12 @@
-# Objects, Functions and The Pipe Operator %>%
+---
+title: "Objects, Functions and The Pipe Operator %>%"
+output: github_document 
+always_allow_html: true
+---
 
 Everything in R is an object
 
-Make an object and use str to look at its type
+Make an object and use `str` to look at its type
 
 ```{r}
 x <- 10
@@ -33,14 +37,16 @@ jamessum <- function(a,b) {
 jamessum(1,2)
 ```
 
-Functions are written as verb(object)
+Functions are written as `verb(object)`
 
-When you see functions written down it looks like verb(noun)
-Pick up the cat ===> pickup(cat)
+When you see functions written down it looks like `verb(noun)`:
 
-This makes sense when you are only doing one thing to an object or a group of objects
+`Pick up the cat ===> pickup(cat)`
+
+This makes sense when you are only doing one thing to an object or a group of objects.
 
 But often we are doing multiple things to to the cat.
+
 When we're talking about this we might say:
 
 Get the cat
@@ -48,30 +54,32 @@ Get the cat
  - then put it on your lap
  - then stoke it.
 
-The pipe operator %>% is a useful thing that let us do this
+The pipe operator `%>%` is a useful thing that let us do this:
 
-
+```R
 cat %>%
   pick_up() %>%
   put_on_lap() %>%
   stroke()
+```
 
+Whereas in our normal syntax land we would have to do this:
 
-Whereas in our normal syntax land we would have to do this...
+`stroke(put_on_lap(pick_up(cat)))`
 
-stroke(put_on_lap(pick_up(cat)))
-
-...which you'll probably agree is a lot more confusing
-It is backwards compared to the way you understand it as a human.
-
+...which you'll probably agree is a lot more confusing. It is backwards compared to the way you understand it as a human.
 
 The pipe operator let's us chain together operations on the same object.
 
-The tidyverse package functions are written in a consistent way that makes it easy to chain things together.
+The `tidyverse` package functions are written in a consistent way that makes it easy to chain things together.
 
-Install and load tidyverse
+Install and load tidyverse:
 
-```{r}
+```{r, include=FALSE} 
+library(tidyverse)
+```
+
+```{r, eval=FALSE}
 install.packages('tidyverse')
 library(tidyverse)
 ```

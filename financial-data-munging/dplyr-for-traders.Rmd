@@ -1,4 +1,8 @@
-# dplyr for traders
+---
+title: "dplyr for traders"
+output: github_document 
+always_allow_html: true
+---
 
 We're going to show how a quant trader can manipulate stock price data using the dplyr package.
 
@@ -31,7 +35,7 @@ This is a very helpful way to stucture your price data. We'll see how we can use
 
 # The main dplyr verbs
 
-There are 6 main functions to master in dplyr. 
+There are 6 main functions to master in `dplyr`. 
 
 - `filter()` picks outs observations (rows) by some filter criteria
 - `arrange()` reorders the observations (rows)
@@ -52,7 +56,7 @@ prices %>%
   filter(ticker == 'XOM')
 ```
 
-Filter returns all observations (rows) which satisfy the criteria within the filter function.
+`filter()` returns all observations (rows) which satisfy the criteria within the `filter()` function.
 
 ### Filtering rows for multiple stocks with `filter()` and %in%
 
@@ -63,7 +67,7 @@ prices %>%
 
 ## Arrange
 
-Arrange reorders the rows in your data by one or more criteria.
+`arrange()` reorders the rows in your data by one or more criteria.
 
 ## Reordering rows in order of volume traded ascending with `arrange()`
 
@@ -83,7 +87,7 @@ prices %>%
 
 ## Selecting columns with `select()`
 
-Here we use select to pull out the ticker, date, close columns.
+Here we use `select()` to pull out the ticker, date, close columns.
 
 ```{r}
 prices %>%
@@ -101,13 +105,13 @@ prices %>%
   arrange(desc(date))
 ```
 
-When debugging a dplypr pipeline, it can be helpful to select each transformation one by one, and press CTRL-Enter in Rstudio to just run the selected transfomration.
+When debugging a `dplyr` pipeline, it can be helpful to select each transformation one by one, and press CTRL-Enter in Rstudio to just run the selected transformation.
 
 # Mutate
 
 Now we get onto slightly more exciting stuff. 
 
-Mutate lets us add variables (columns) to our data. These are usually derived from existing columns.
+`mutate()` lets us add variables (columns) to our data. These are usually derived from existing columns.
 
 ## Add new variable (column) for log volume with `mutate()`
 
@@ -149,7 +153,7 @@ Usually you want to group by a variable, and then summarise that grouped data.
 
 The `group_by()` function tells the dplyr verbs to operate on each group one at a time. 
 
-If we group by ticker, then call summarise, then dplyr will preform the summary calculations separately for each ticker. We will get a row for each ticker.
+If we group by ticker, then call summarise, then `dplyr` will preform the summary calculations separately for each ticker. We will get a row for each ticker.
 
 ```{r}
 prices %>% 
@@ -191,9 +195,9 @@ Arrange your data so:
 - Every column is variable
 - Every row is an observation
 
-You can then easily use dplyr to manipulate that data very efficiently. 
+You can then easily use `dplyr` to manipulate that data very efficiently. 
 
-There are 6 main functions to master in dplyr. 
+There are 6 main functions to master in `dplyr`. 
 
 - `filter()` picks outs observations (rows) by some filter criteria
 - `arrange()` reorders the observations (rows)

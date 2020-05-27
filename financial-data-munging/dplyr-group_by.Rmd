@@ -1,0 +1,42 @@
+---
+title: "Demonstration of dplyr::group_by"
+output: github_document 
+always_allow_html: true
+---
+
+The following code demonstrates how `dplyr::group_by` works.
+
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+
+my_division <- function(x, y) {
+  message("I was just called")
+  x / y
+}
+
+data <- tibble(x = c(-14, 2.55, -24.4, -0.0557, 6.22))
+
+# Called 1 time
+data %>%
+  mutate(new = my_division(x, 10))
+
+gdata <- data %>% group_by(g = c("a", "a", "b", "b", "c"))
+
+# Called 3 times
+gdata %>%
+  mutate(new = my_division(x, 10))
+```
+
+If the operation is entirely vectorised, the result will be the same whether the tibble is grouped or not, since elementwise computations are not affected by the values of other elements. But as soon as summary operations are involved, the result depends on the grouping structure because the summaries are computed from group sections instead of whole columns.
+
+```{r}
+# Marginal rescaling
+data %>%
+  mutate(new = x / sd(x))
+
+# Conditional rescaling
+gdata %>%
+  mutate(new = x / sd(x))
+```
+
