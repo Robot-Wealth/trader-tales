@@ -1,0 +1,48 @@
+---
+title: "Profiling R Code"
+output: html_notebook
+---
+
+## Why Profile R Code?
+
+On the one hand, premature optimisation is to be avoided, but performance does matter. 
+
+Bottlenecks in your code might surprise you - profiling is an opportunity to identify and fix bad practices. We all want to be better programmers - profiling code provides useful lessons. 
+
+Sometimes, you just have to in order to fix a critical bottleneck. 
+
+## First Step: Timing
+
+Getting simple timings as a basic measure of performance is straightforward. 
+
+`system.time()` for timing blocks of code...but beware timing one evaluation can be misleading
+`microbenchmark` is now the standard - statistical timing measurements (useful since executing a function a second time for instance can make it run faster...), nice plot outputs. There's also `rbenchmark`.
+`Rprof()` timing execution of functions
+`Rprofmem()` report memory allocation
+`tracemem()` detect when a copy of an object is created
+
+```{r}
+system.time()
+```
+
+Mention changing the outcome by measuring it
+
+A number of profiling tools available in R ... mention them, but demo profvis
+
+Mention that compiling functions can offer a tiny speedup...
+Better R code is usually more performant - avoid loops (pre-allocate large objects if can't avoid), use better vectorisation where possible...noting that can consume lots of memory, 
+
+With a few exceptions (ff, bigmemory), R does computations in memory
+
+Steps:
+
+- Get the code working
+- Profile
+- Fix obvious things
+- Weigh options:
+  - lapply, vectorisation, some package
+  - Rcpp
+  - parallel
+  - some combination
+- bytecode compiler for small speedups
+
