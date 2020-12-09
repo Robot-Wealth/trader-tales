@@ -1,0 +1,371 @@
+---
+title: "Machine Learning with David Aronson's SSML"
+output: html_notebook
+---
+
+## Load libraries 
+
+```{r}
+library(tidyverse);library(lubridate);library(tidymodels);library(corrplot);library(caret);library(minerva);library(glmulti);library(Boruta)
+library(here)
+```
+
+## Read in and process data
+
+```{r}
+vars <- read_csv(here::here("research-examples/aronson-ml/eurusd_2009_2019_9am.csv"), na = c('NA', '-1.#IND0'))
+
+# process data
+vars <- vars %>% 
+  # create date object
+  mutate('DDMMYYYY' = as_date(DDMMYYYY, format = '%d.%m.%Y')) %>% 
+  # shorten some variable names
+  rename_with(~sub('Norm', '', .x)) %>% 
+  rename_with(~sub('[N]', '', .x)) %>% 
+  # omit rows with NA (first ~50 rows)
+  na.omit()
+
+
+vars %>% 
+  head()
+```
+## Remove highly correlated variables
+
+```{r, fig.height=7, fig.width=7}
+# calculate a correlation matrix
+cor <- vars %>% 
+  select(c(-DDMMYYYY, -target, -H, -L, -C)) %>% 
+  cor()
+
+# get the column names to drop to reduce pairwise correlations
+high_cor_idx <- caret::findCorrelation(cor, cutoff = 0.3)
+high_cor_cols <- colnames(cor)[high_cor_idx]
+
+# create data frame of variables to keep
+vars_filt <- vars %>% 
+  select(c(-DDMMYYYY, -target, -H, -L, -C, -all_of(high_cor_cols)))
+
+# plot the correlation matrix of remaining variables
+vars_filt %>% 
+  cor() %>% 
+  corrplot::corrplot(order = "hclust", type = 'lower', diag = FALSE, addCoef.col = "black", number.digits = 2, number.cex = 0.7)
+```
+## Maximal Information Coefficient 
+
+```{r}
+res <- vars_filt %>% 
+  minerva::mine(vars$target)
+
+mic <- data.frame(
+  'var' = vars_filt %>% 
+    colnames(), 
+  res$MIC
+) %>% 
+  arrange(desc(Y))
+
+mic
+
+```
+
+## Recursive feature elimination
+
+```{r}
+# define the control function and CV method
+cntrl <- caret::rfeControl(functions = rfFuncs, method = "cv", number = 5)
+
+# do ref
+rfe_results <- caret::rfe(vars_filt, vars$target, sizes=c(2:12), rfeControl=cntrl)
+
+print(rfe_results)
+
+# list final feature set
+predictors(rfe_results)
+plot(rfe_results, type='l')
+```
+
+```{r}
+data.frame(
+  'var' = predictors(rfe_results), 
+  'imp' = rfe_results$fit$importance
+) %>% 
+  arrange(desc(imp..IncMSE)) %>% 
+  ggplot(aes(x = reorder(var, imp..IncMSE), y = imp..IncMSE)) +
+    geom_col(fill = 'skyblue1') +
+    coord_flip() +
+    labs(x = 'Variable', y = 'Importance', title = 'Feature Importance') +
+    theme_bw()
+```
+
+## RFE with a more relevant summary function
+
+```{r}
+absretSummary <- function(data, lev = NULL, model = NULL) {
+  positions <-ifelse(abs(data[, "pred"]) > 5, sign(data[, "pred"]), 0)
+  trades <- abs(c(1, diff(positions))) 
+  profits <- positions*data[, "obs"]
+  profit <- sum(profits)
+  names(profit) <- 'profit'
+  return(profit)
+}
+
+cntrl$functions$summary <- absretSummary
+rfe_results_absret <- rfe(vars_filt, vars$target, sizes=c(2:12), rfeControl = cntrl, metric = 'profit', maximize = TRUE)
+
+# list final feature set
+predictors(rfe_results_absret)
+plot(rfe_results_absret, type='l')
+```
+
+```{r}
+data.frame(
+  'var' = predictors(rfe_results_absret), 
+  'imp' = rfe_results_absret$fit$importance
+) %>% 
+  arrange(desc(imp..IncMSE)) %>% 
+  ggplot(aes(x = reorder(var, imp..IncMSE), y = imp..IncMSE)) +
+    geom_col(fill = 'skyblue1') +
+    coord_flip() +
+    labs(x = 'Variable', y = 'Importance', title = 'Feature Importance') +
+    theme_bw()
+```
+
+## Models with in-built feature selection
+
+```{r}
+# create indexes for time series cross validation windows
+init = 200 # initial window
+horiz = 20 # prediction horizon
+wdw <- createTimeSlices(1:nrow(vars_filt), initialWindow = init, horizon = horiz, skip = horiz-1, fixedWindow = TRUE)
+trainSlices <- wdw[[1]]
+testSlices <- wdw[[2]]
+
+# verify visually correct window setup:
+trainSlices[[length(trainSlices)]]
+testSlices[[length(testSlices)]]
+
+# caret trainControl function
+cntrl <- trainControl(
+  summaryFunction = absretSummary, 
+  savePredictions = "all", 
+  returnResamp = "all", 
+  index = trainSlices, 
+  indexOut = testSlices
+)
+
+# Bagged MARS
+bMARS <- train(
+  x = as.data.frame(vars_filt), 
+  y = vars$target, 
+  method = "bagEarth", 
+  trControl = cntrl, 
+  metric = "profit", 
+  maximize=TRUE, 
+  tuneGrid = data.frame(nprune = 2, degree = 3)
+)
+predictors(bMARS)
+# "apc10" "atrRatSlow" "ATRSlow" "HurstFaster" "deltaPVR5" "trend" "mom3" "deltaPVR3" "deltaMMIFastest5" "deltaATRrat10" "MMIFaster" "bWidthSlow"      
+
+# Boosted Generalized Additive Model
+bstGAM <- train(
+  x = as.data.frame(vars_filt), 
+  y = vars$target,
+  method = "gamboost", 
+  trControl = cntrl, 
+  metric = "profit", 
+  maximize = TRUE, 
+  tuneGrid = data.frame(mstop = c(100, 200), prune = c(TRUE, FALSE))
+)
+predictors(bstGAM)
+# "mom3"
+
+# Lasso
+lasso <- train(
+  x = as.data.frame(vars_filt), 
+  y = vars$target, 
+  method = "lasso", 
+  trControl = cntrl, 
+  metric = "profit", 
+  maximize = TRUE, 
+  tuneGrid = data.frame(fraction = c(1:10)/10)
+)
+predictors(lasso)
+# "apc10"  "deltaPVR3" "MMIFaster" "atrRatSlow" 
+
+# Spike and Slab
+ssr <- train(
+  x = as.data.frame(vars_filt), 
+  y = vars$target, 
+  method = "spikeslab", 
+  trControl = cntrl, 
+  metric = "profit", 
+  maximize = TRUE, 
+  tuneGrid = data.frame(vars = c(2,3,4,5,10,15))
+)
+predictors(ssr)
+# "deltaPVR3" "MMIFaster"
+
+predictors <- c(predictors(bMARS), predictors(bstGAM), predictors(lasso), predictors(ssr))
+
+# frequency of selection in top 5
+as.data.frame(table(predictors)) %>% 
+  arrange(desc(Freq)) %>% 
+  ggplot(aes(reorder(predictors, Freq), Freq/4.)) +
+    geom_bar(stat="identity", fill="skyblue1") +
+    theme_bw() +
+    coord_flip() + 
+    # theme(axis.text.x=element_text(angle = -90, hjust = 0)) +
+    labs(x = 'Variable', y = 'Proportional Frquency', title = 'Proportional Frequency of Selection in Top 5 Important Features')
+```
+
+## glmulti
+
+```{r}
+xy <- vars_filt
+xy$target <- vars$target
+
+y <- glm(target ~ ., data = xy)
+L1_models <- glmulti(y, level = 1, crit = "aicc")
+plot(L1_models, type = 's', col = 'skyblue1')
+print(L1_models)
+
+# glmulti.analysis
+# Method: h / Fitting: glm / IC used: aicc
+# Level: 1 / Marginality: FALSE
+# From 100 models:
+# Best IC: 31216.8153639823
+# Best model:
+# [1] "target ~ 1 + MMIFaster"
+# Evidence weight: 0.0283330120226094
+# Worst IC: 31220.2936057687
+# 29 models within 2 IC units.
+# 90 models to reach 95% of evidence weight.
+
+# retain models with AICs less than 2 units from 'best' model
+weights <- weightable(L1_models)
+bst <- weights[weights$aic <= min(weights$aic) + 2, ]
+print(bst) 
+# > bst
+#                                                          model     aicc    weights
+# 1                                       target ~ 1 + MMIFaster 31216.82 0.02833301
+# 2                               target ~ 1 + apc10 + MMIFaster 31216.94 0.02668724
+# 3                          target ~ 1 + MMIFaster + atrRatSlow 31217.13 0.02418697
+# 4                   target ~ 1 + apc10 + deltaPVR3 + MMIFaster 31217.17 0.02377989
+# 5                           target ~ 1 + deltaPVR3 + MMIFaster 31217.18 0.02361508
+# 6                  target ~ 1 + apc10 + MMIFaster + atrRatSlow 31217.30 0.02226910
+# 7              target ~ 1 + deltaPVR3 + MMIFaster + atrRatSlow 31217.47 0.02042182
+# 8      target ~ 1 + apc10 + deltaPVR3 + MMIFaster + atrRatSlow 31217.50 0.02009271
+# 9                          target ~ 1 + MMIFaster + bWidthSlow 31218.33 0.01330753
+# 10                              target ~ 1 + MMIFaster + trend 31218.47 0.01237686
+# 11                 target ~ 1 + MMIFaster + trend + atrRatSlow 31218.48 0.01233432
+# 12                                                  target ~ 1 31218.52 0.01211088
+# 13         target ~ 1 + deltaATRrat10 + MMIFaster + atrRatSlow 31218.52 0.01209924
+# 14                      target ~ 1 + deltaATRrat10 + MMIFaster 31218.52 0.01207773
+# 15                 target ~ 1 + apc10 + MMIFaster + bWidthSlow 31218.52 0.01207104
+# 16              target ~ 1 + apc10 + deltaATRrat10 + MMIFaster 31218.56 0.01184645
+# 17 target ~ 1 + apc10 + deltaATRrat10 + MMIFaster + atrRatSlow 31218.57 0.01177378
+# 18                        target ~ 1 + MMIFaster + HurstFaster 31218.58 0.01174280
+# 19                            target ~ 1 + MMIFaster + ATRSlow 31218.59 0.01165791
+# 20             target ~ 1 + deltaPVR3 + MMIFaster + bWidthSlow 31218.59 0.01164927
+# 21                target ~ 1 + apc10 + MMIFaster + HurstFaster 31218.65 0.01133414
+# 22     target ~ 1 + apc10 + deltaPVR3 + MMIFaster + bWidthSlow 31218.66 0.01126059
+# 23                   target ~ 1 + MMIFaster + deltaMMIFastest5 31218.70 0.01105118
+# 24                    target ~ 1 + apc10 + MMIFaster + ATRSlow 31218.71 0.01100487
+# 25                                     target ~ 1 + atrRatSlow 31218.72 0.01092551
+# 26     target ~ 1 + deltaPVR3 + MMIFaster + trend + atrRatSlow 31218.75 0.01079397
+# 27                          target ~ 1 + deltaPVR5 + MMIFaster 31218.78 0.01059770
+# 28                  target ~ 1 + deltaPVR3 + MMIFaster + trend 31218.79 0.01057023
+# 29                               target ~ 1 + mom3 + MMIFaster 31218.81 0.01046743
+```
+
+## Generalized linear model with stepwise selection
+
+```{r}
+cntrl <- trainControl(
+  summaryFunction = absretSummary, 
+  method = "timeslice", 
+  initialWindow = 200, 
+  horizon = 50, 
+  fixedWindow = TRUE
+)
+glmStepAICModel <- train(
+  vars_filt, 
+  vars$target, 
+  method = "glmStepAIC", 
+  trControl = cntrl, 
+  metric = "profit", 
+  maximize = TRUE
+)
+
+print(glmStepAICModel$finalModel)
+# Call:  NULL
+# 
+# Coefficients:
+#   (Intercept)        trend   atrRatSlow  
+# -1.907       -3.632       -5.100  
+# 
+# Degrees of Freedom: 2024 Total (i.e. Null);  2022 Residual
+# Null Deviance:	    8625000 
+# Residual Deviance: 8593000 	AIC: 22670
+```
+
+## Boruta
+
+```{r}
+bor <- Boruta(target ~ ., data = xy, maxRuns=1000)
+plot(bor, las=3, xlab=NULL, colCode=c("seagreen3", "goldenrod1", "tomato2", "dodgerblue3"))
+print(bor)
+
+# Boruta performed 103 iterations in 3.279162 mins.
+#  8 attributes confirmed important: apc10, atrRatSlow, ATRSlow, bWidthSlow, deltaATRrat10 and 3 more;
+#  4 attributes confirmed unimportant: deltaMMIFastest5, HurstFaster, MMIFaster, mom3;
+
+```
+
+## PCA
+
+```{r}
+cntrl <- trainControl(
+  summaryFunction = absretSummary, 
+  method = "timeslice", 
+  initialWindow = 200, 
+  horizon = 50, 
+  fixedWindow = TRUE
+)
+
+start.time <- Sys.time()
+pca_model <- train(
+  as.data.frame(vars_filt), 
+  vars$target, 
+  method = 'rf', 
+  preProcess = c('pca'), 
+  trControl = cntrl
+)
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+# Time difference of 35.44463 mins
+
+start.time1 <- Sys.time()
+raw.model <- train(
+  vars_filt, 
+  vars$target, 
+  method = 'rf', trControl = cntrl
+)
+end.time1 <- Sys.time()
+time.taken1 <- end.time1 - start.time1
+time.taken1
+
+# compare models
+resamp.results <- resamples(list(PCA = pca.model,
+                                 RAW = raw.model))
+
+trellis.par.set(theme = col.whitebg())
+bwplot(resamp.results, layout = c(1, 1))
+```
+
+## GBM
+
+```{r}
+
+```
+
