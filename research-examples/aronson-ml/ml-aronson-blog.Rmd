@@ -361,12 +361,12 @@ resamp_results <- resamples(list(PCA = pca_model, RAW = raw_model))
 trellis.par.set(theme = col.whitebg())
 bwplot(resamp_results, layout = c(1, 1))
 ```
-
 ## GBM
 
 ```{r}
 gbm_data <- vars_filt %>% 
-  select(c(target, atrRatSlow, trend, apc10, deltaPVR3))
+  select(c(atrRatSlow, trend, apc10, deltaPVR3)) %>% 
+  mutate(target = vars$target)
 
 # create indexes for TSCV windows
 init = 200 # initial window 
@@ -398,7 +398,7 @@ cntrl <- trainControl(
 set.seed(53)
 gbm_model <- train(
   x = gbm_data %>% select(-target), 
-  y = gbm.data %>%  select(target), 
+  y = gbm_data %>% select(target) %>%  pull(), 
   method = "gbm", 
   trControl = cntrl, 
   metric = "profit",
@@ -440,21 +440,23 @@ colnames(PnL_df) <- c("T0", "T20", "T50", "T100", "T125", "T150")
 # PnL.df <- PnL.df - cost
 
 # add date for plotting
-PnL_df$Date <- as.Date(as.character(rownames(gbm_data[(init+1):testSlices[[length(testSlices)]][horiz], ])), format="%d.%m.%Y")
+PnL_df$Date <- vars$DDMMYYYY[(init+1):testSlices[[length(testSlices)]][horiz]]
 
-# add underlying PnL curve
-PnL_df$Underlying <- cumsum(gbm_data[(init+1):testSlices[[length(testSlices)]][horiz], "target" ])
+# add underlying PnL curve - volatility weighted
+PnL_df <- PnL_df %>% 
+  mutate("Underlying" =  pull(cumsum(gbm_data[(init+1):testSlices[[length(testSlices)]][horiz], "target" ])))
 
 # pivot data to long form
-mlt <- melt(PnL_df, id="Date", value="PnL", variable_name="Threshold")
 PnL_df_long <- PnL_df %>% 
-  pivot_longer()
+  pivot_longer(-Date, names_to = "Strategy", values_to = "PnL")
 
 # plot PnLs for various thresholds and buy & hold
 PnL_df_long %>% 
-  ggplot(aes(x=Date, y=value)) +
-    geom_line(aes(colou = Threshold, group = Threshold)) +
-    labs(y = "PnL excl. Costs")
+  ggplot(aes(x = Date, y = PnL, colour = factor(Strategy, levels = c("T0", "T20", "T50", "T100", "T125", "T150", "Underlying"), ordered = TRUE))) +
+    geom_line() +
+    scale_colour_brewer(type = "qual", palette = "Dark2") +
+    labs(y = "PnL excl. Costs", colour = "Strategy") + 
+    theme_bw()
 
 ### Notes on caret ts cross validation:
 # We can set up TSCV using timeSlices and initial window, horizon and skip to mimic WFO. 
