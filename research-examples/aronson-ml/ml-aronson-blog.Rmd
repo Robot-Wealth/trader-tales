@@ -346,8 +346,8 @@ time.taken
 # Time difference of 35.44463 mins
 
 start.time1 <- Sys.time()
-raw.model <- train(
-  vars_filt, 
+raw_model <- train(
+  as.data.frame(vars_filt), 
   vars$target, 
   method = 'rf', trControl = cntrl
 )
@@ -356,16 +356,113 @@ time.taken1 <- end.time1 - start.time1
 time.taken1
 
 # compare models
-resamp.results <- resamples(list(PCA = pca.model,
-                                 RAW = raw.model))
+resamp_results <- resamples(list(PCA = pca_model, RAW = raw_model))
 
 trellis.par.set(theme = col.whitebg())
-bwplot(resamp.results, layout = c(1, 1))
+bwplot(resamp_results, layout = c(1, 1))
 ```
 
 ## GBM
 
 ```{r}
+gbm_data <- vars_filt %>% 
+  select(c(target, atrRatSlow, trend, apc10, deltaPVR3))
 
+# create indexes for TSCV windows
+init = 200 # initial window 
+horiz = 50 # prediction horizon 
+wdw <- createTimeSlices(
+  1:nrow(gbm_data), 
+  initialWindow = init, 
+  horizon = horiz, 
+  skip = horiz-1, 
+  fixedWindow = TRUE
+)
+trainSlices <- wdw[[1]]
+testSlices <- wdw[[2]]
+
+# verify visually correct window setup:
+trainSlices[[length(trainSlices)]]
+testSlices[[length(testSlices)]]
+
+# trainControl function
+cntrl <- trainControl(
+  summaryFunction = absretSummary, 
+  savePredictions = TRUE, 
+  returnResamp = "final", 
+  index = trainSlices, 
+  indexOut = testSlices
+) 
+
+# train gbm model            
+set.seed(53)
+gbm_model <- train(
+  x = gbm_data %>% select(-target), 
+  y = gbm.data %>%  select(target), 
+  method = "gbm", 
+  trControl = cntrl, 
+  metric = "profit",
+  maximize = TRUE, 
+  tuneGrid = expand.grid(
+    interaction.depth = 3,
+    n.trees = 1000,
+    shrinkage = 1,
+    n.minobsinnode = 10
+    )
+  )
+
+# extract predictions and observations from each test window
+gbm_preds <- gbm_model$pred[, c("pred", "obs")]
+
+# generate trades and PnLs for various prediction thresholds
+i <- 1
+trades <- list()
+PnL <- list()
+for(thresh in c(0, 20, 50, 100, 125, 150)) {
+  gbm_trades <- ifelse(
+    gbm_preds$pred > thresh, gbm_preds$obs, 
+    ifelse(gbm_preds$pred < -thresh, -gbm_preds$obs, 0))
+  
+  gbm_PnL <- cumsum(gbm_trades)
+  
+  trades[[i]] <- gbm_trades
+  PnL[[i]] <- gbm_PnL
+  i <- i + 1
+}
+
+# Plot the equity curves
+PnL_df <- as.data.frame(PnL)
+colnames(PnL_df) <- c("T0", "T20", "T50", "T100", "T125", "T150")
+
+# calculate and subtract transaction costs
+# lots <- 1/(1000*vars$ATRMod[ (init+1):testSlices[[length(testSlices)]][horiz] ])
+# cost <- lots*20
+# PnL.df <- PnL.df - cost
+
+# add date for plotting
+PnL_df$Date <- as.Date(as.character(rownames(gbm_data[(init+1):testSlices[[length(testSlices)]][horiz], ])), format="%d.%m.%Y")
+
+# add underlying PnL curve
+PnL_df$Underlying <- cumsum(gbm_data[(init+1):testSlices[[length(testSlices)]][horiz], "target" ])
+
+# pivot data to long form
+mlt <- melt(PnL_df, id="Date", value="PnL", variable_name="Threshold")
+PnL_df_long <- PnL_df %>% 
+  pivot_longer()
+
+# plot PnLs for various thresholds and buy & hold
+PnL_df_long %>% 
+  ggplot(aes(x=Date, y=value)) +
+    geom_line(aes(colou = Threshold, group = Threshold)) +
+    labs(y = "PnL excl. Costs")
+
+### Notes on caret ts cross validation:
+# We can set up TSCV using timeSlices and initial window, horizon and skip to mimic WFO. 
+# If we do hyperparameter tuning, savePreds="all" returns all predictions from each test window 
+# for each hyperparameter combination. To get an assessment of how it would have peformed in 
+# trading, set up the same train function but with the hyperparameters set to the best identified 
+# in TSCV. Then savePreds="all" returns only the test window results - from there you can perform 
+# other analysis. Also note that caret fits a model on the entire data set after cross-validation 
+# - this is generally not what we want to do in this context. 
 ```
 
