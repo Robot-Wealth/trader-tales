@@ -1,0 +1,238 @@
+---
+title: "More Intuitive Joins in dplyr 1.1.0"
+output: html_notebook
+---
+
+```{r, echo=FALSE, results=FALSE, warning=FALSE, message=FALSE}
+library(kableExtra)
+
+pretty_table_1 <- function(df) {
+  df %>% 
+    kable() %>% 
+    kable_styling("striped", full_width = T) 
+}
+
+pretty_table_2 <- function(df) {
+  df %>% 
+    kable() %>% 
+    kable_styling("striped", full_width = T) %>% 
+    column_spec(2, width_min = '2in') %>% 
+    column_spec(11, width_min = '2in') %>% 
+    column_spec(12, width_min = '2in') %>% 
+    scroll_box(width = "100%", height= "250px")
+}
+
+pretty_table_3 <- function(df) {
+  df %>% 
+    kable() %>% 
+    kable_styling("striped", full_width = T) %>% 
+    column_spec(1, width_min = '3in') %>% 
+    column_spec(5, width_min = '3in') %>% 
+    scroll_box(width = "100%", height= "250px")
+}
+
+pretty_table_4 <- function(df) {
+  df %>% 
+    kable() %>% 
+    kable_styling("striped", full_width = T) %>% 
+    column_spec(1, width_min = '3in') %>% 
+    column_spec(5, width_min = '3in') %>% 
+    column_spec(8, width_min = '3in') %>% 
+    scroll_box(width = "100%", height= "250px") 
+}
+```
+
+
+## Introduction
+
+`dplyr 1.1.0` was a significant release that makes several common data operations more syntactically intuitive. 
+
+The most significant changes relate to joins and grouping/aggregating operations. 
+
+In this post we'll look at the changes to joins.
+
+First, install and load the latest version of `dplyr`:
+
+```{r, results=FALSE, warning=FALSE, message=FALSE}
+# install.packages("dplyr")
+library(dplyr)
+```
+
+## New approach to joins
+
+The best way to explore the new syntax is through example. 
+
+Say we had a table of stock prices and a table of industry sectors, and we wanted to join them. The prices table has the field `ticker`, which is equivalent to the field `symbol` on the sectors table.  
+
+An example of this data might look like this:
+
+```{r}
+prices <- data.frame(list(
+  ticker = c("AAPL", "TSLA", "AAPL", "TSLA", "AAPL", "TSLA"), 
+  date = structure(c(18716, 18716, 18717, 18717, 18718, 18718), class = "Date"), 
+  open = c(120.11, 601.75, 121.65, 646.62, 123.66, 688.37), 
+  high = c(120.40305, 637.66, 123.52, 672, 124.18, 692.42015), 
+  low = c(118.86, 591.01, 121.15, 641.11, 122.49, 659.42), 
+  close = c(119.9, 635.62, 122.15, 667.93, 123, 661.75), 
+  unadjusted_close = c(119.9, 635.62, 122.15, 667.93, 123, 661.75), 
+  volume = c(85671920, 39432360, 118323820, 33337288, 75089140, 35298376)
+))
+
+prices %>% 
+  pretty_table_1() 
+```
+
+```{r}
+sectors <- data.frame(list(
+  symbol = c("AAPL", "TSLA"), name = c("Apple Inc", "Tesla Inc"), 
+  sector = c("Technology", "Consumer Cyclical"), 
+  industry = c("Consumer Electronics", "Auto Manufacturers"), 
+  sicindustry = c("Electronic Computers", "Motor Vehicles & Passenger Car Bodies")
+))
+
+sectors %>% 
+  pretty_table_1()
+```
+
+The legacy approach to doing this join would look like this:
+
+```{r}
+prices %>% 
+  left_join(sectors, by = c(ticker = "symbol")) %>% 
+  pretty_table_2() 
+```
+
+Have you ever felt like that `by = c(ticker = "symbol")` argument is a bit off? I know it's only semantics, but  `ticker = "symbol"` feels like an assignment operation rather than an equivalence operation. It's unintuitive.
+
+The new approach uses a helper function: `join_by`. 
+
+`join_by` takes an expression that more naturally conveys the intent behind the join:
+
+```{r}
+join_by(ticker == symbol)
+
+```
+
+Here it is in action:
+
+```{r}
+prices %>% 
+  left_join(sectors, by = join_by(ticker == symbol)) %>% 
+  pretty_table_2()
+```
+
+That feels much more natural to me. 
+
+### Inequality joins with `join_by`
+
+`join_by` has some useful features that were hard to implement in previous version of `dplyr`. 
+
+Say I have a bunch of trades and quotes data. I want to match each trade with the previous quote that's closest in time. 
+
+Here are some trades and quotes data:
+
+*Trades:*
+
+```{r}
+options("digits.secs" = 6)
+
+trades <- data.frame(list(
+  time = structure(c(1464197400.023, 1464197400.038, 1464197400.048, 1464197400.048, 
+1464197400.048), class = c("POSIXct", "POSIXt"), tzone = "America/New_York"), 
+  ticker = c("MSFT", "MSFT", "GOOG", "GOOG", "AAPL"), 
+  price = c(51.95, 51.95, 720.77, 720.92, 98), 
+  quantity = c(75, 155, 100, 100, 100)
+))
+
+trades %>% 
+  pretty_table_1() 
+```
+
+*Quotes:*
+
+```{r}
+quotes <- data.frame(list(
+  time = structure(c(1464197400.023, 1464197400.023, 1464197400.03, 1464197400.041, 
+1464197400.048, 1464197400.049, 1464197400.072, 1464197400.075), class = c("POSIXct", "POSIXt"), tzone = "America/New_York", class = c("POSIXct", "POSIXt"), tzone = "America/New_York"), 
+  ticker = c("GOOG", "MSFT", "MSFT", "MSFT", "GOOG", "AAPL", "GOOG", "MSFT"), 
+  bid = c(720.5, 51.95, 51.97, 51.99, 720.5, 97.99, 720.5, 52.01), 
+  ask = c(720.93, 51.96, 51.98, 52, 720.93, 98.01, 720.88, 52.03)
+))
+
+quotes %>% 
+  pretty_table_1() 
+```
+
+We can find the most recent quote prior to each trade by passing an equality expression to `join_by`, which we wrap in the helper function `closest`:
+
+```{r}
+join_by(ticker, closest(time >= time)) 
+```
+
+```{r}
+trades %>% 
+  left_join(quotes, by = join_by(ticker, closest(time >= time)), suffix = c(".trade", ".quote")) %>% 
+  pretty_table_3()
+```
+
+This is functionally equivalent to the SQL operation `ASOF` and the `merge_asof` function in `pandas` (in fact, I took the data for this example from the `pandas` docs).
+
+Note in the above example, we got a trade in MSFT outside the quoted bid-ask, which [can happen](https://www.sciencedirect.com/science/article/abs/pii/S0304405X0500156X).
+
+It might be reasonable to not match when the times are equal, in which case we can change the `>=` equality to `>` (here we have millisecond precision, and it's entirely reasonable that a quote and a trade could occur in the same millisecond, but ignore that for the sake of the example):
+
+```{r}
+trades %>% 
+  left_join(quotes, by = join_by(ticker, closest(time > time)), suffix = c(".trade", ".quote")) %>% 
+  pretty_table_3()
+```
+
+We could impose a 2ms gap between our quote and our matched trade, but to do this we need to make a new column, as `join_by` can't take a computed column:
+
+```{r}
+library(lubridate)
+
+trades %>%
+  left_join(
+    # create new column before doing the join
+    quotes %>% mutate(time_buffer = time + lubridate::seconds(2/1e3)), 
+    by = join_by(ticker, closest(time >= time_buffer)), 
+    suffix = c(".trade", ".quote")
+  ) %>% 
+  pretty_table_4()
+  
+```
+
+Lastly, `join_by` can take helpers other than `closest` to create overlapping joins:  
+- `between`  
+- `within`  
+- `overlaps`  
+
+For example, we can match trades to all quotes that occur within the prior 15ms:
+
+```{r}
+trades %>%
+  left_join(
+    quotes %>% mutate(time_buffer = time + lubridate::seconds(15/1e3)), 
+    by = join_by(ticker, between(x = time, y_lower = time, y_upper = time_buffer, bounds = "[]")), 
+    suffix = c(".trade", ".quote")
+  ) %>% 
+  pretty_table_4()
+```
+
+Note how this method matches the second MSFT trade at 13:30:00.038 to two quotes at 13:30:00.023 and 13:30:00.029.
+
+## Will the old approaches still work?
+
+Yes, for now. The `dplyr` docs state that both approaches to joining are supported, and there is no mention of deprecating the legacy approach. Good news for backwards compatibility. 
+
+However, I'm not even sure how you'd implement an `ASOF` or an overlapping join using that approach. The new approach opens up a whole new set of joining operations.
+
+## Other changes in dplyr 1.1.0
+
+The other big change in `dplyr` 1.1.0 is the approach to grouping and aggregating data. I'll take a look at that in another post. 
+
+## Your thoughts?
+
+What do you think? Do you prefer this new approach to joining data in `dplyr`? Does it feel more natural, or more aligned with what you might have done in SQL? Let me know in the comments. 
+
