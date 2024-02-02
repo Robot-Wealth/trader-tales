@@ -1,0 +1,226 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r, include=FALSE}
+knitr::opts_chunk$set(fig.width = 11, fig.height = 5, fig.align = 'center') 
+```
+
+# Efficiently Simulating Geometric Brownian Motion in R
+
+For simulating stock prices, Geometric Brownian Motion (GBM) is the *de-facto* go-to model.
+
+It has some nice properties which are generally consistent with stock prices, such as being log-normally distributed (and hence bounded to the downside by zero), and that expected returns don't depend on the magnitude of price. 
+
+Of course, GBM is just a model and no model is a perfect representation of reality. In particular, GBM uses a constant volatility, which is clearly at odds with reality. It also doesn't account for jumps, such as those caused by news.
+
+In spite of those limitaions, GBM is a useful starting point for modeling the behaviour of stock prices. In particular, it's great for building intuition about various finance concepts - notably, options pricing.
+
+Normally when we're modeling stock prices, our use case requires running a large number of simulations in order to generate a distribution of possible outcomes. 
+
+Since such a use-case requires running a GBM simulator numerous times, it can pay to think about optimising code for speed. A small amount of forethought can save a ton of time down the track. 
+
+Of course, you want to avoid the temptation to optimise early lest you spend more time optimising code than what you gain in time saved by the optimisation itself. But R lends itself to some simple out-of-the-box optimisations that provide great speed-up for little invested time. 
+
+In this post, I'll demonstrate two approaches to simulating price paths using GBM:
+
+- Using `for` loops to iterate over the number of simulations and the number of time-steps in each
+- Vectorisation, where we operate on an entire vector or matrix at once
+
+## The loop-based GBM simulation
+
+Here's some code for running a GBM simulation in a nested `for` loop:
+
+```{r}
+gbm_loop <- function(nsim = 100, t = 25, mu = 0, sigma = 0.1, S0 = 100, dt = 1./365) {
+  gbm <- matrix(ncol = nsim, nrow = t)
+  for (simu in 1:nsim) {
+    gbm[1, simu] <- S0
+    for (day in 2:t) {
+      epsilon <- rnorm(1)
+      dt = 1 / 365
+      gbm[day, simu] <- gbm[(day-1), simu] * exp((mu - sigma * sigma / 2) * dt + sigma * epsilon * sqrt(dt))
+    }
+  }
+  
+  return(gbm)
+}
+```
+
+If I run it say, 50 times, I get price paths that look like this:
+
+```{r, loop_sim, message=FALSE}
+library(tidyverse)
+
+nsim <- 50
+t <- 100
+mu <- 0
+sigma <- 0.1
+S0 <- 100
+
+gbm <- gbm_loop(nsim, t, mu, sigma, S0)
+
+gbm_df <- as.data.frame(gbm) %>%
+  mutate(ix = 1:nrow(gbm)) %>%
+  pivot_longer(-ix, names_to = 'sim', values_to = 'price')
+
+gbm_df %>%
+  ggplot(aes(x=ix, y=price, color=sim)) +
+  geom_line() +
+  theme(legend.position = 'none')
+```
+
+Looks like not unreasonable representations of a random price process with annualised volatility of 10%. And that actually ran pretty quickly. 
+
+Let's see how fast this thing runs if we ask it for 50,000 simulations: 
+
+```{r}
+start <- Sys.time()
+gbm <- gbm_loop(nsim = 50000, t, mu, sigma, S0)
+Sys.time() - start
+
+```
+
+About ten seconds. Not the end of the world, but one could imagine this quickly becoming tedious. 
+
+## Vectorised approach to GBM simulation
+
+Many operations in R are vectorised - which means that operations can occur in parallel under the hood, or at least can run much faster using tight loops written in C and hidden from the user.
+
+The classic example of vectorisation in action is to add two vectors elementwise. The for-loop version of such an operation looks like this:
+
+```{r}
+x <- c(1:10)
+y <- c(10:1)
+
+z <- numeric(length(x))
+for(i in c(1:length(x))) {
+  z[i] <- x[i] + y[i]
+}
+
+z
+```
+
+That's quite a lot of code....
+
+With vectorisation, we can simply do:
+
+```{r}
+z <- x + y
+z
+```
+
+Lots of operations in R are vectorised - in fact, R was designed with this in mind. 
+
+Let's vectorise an operation in our GBM simulator to demonstrate. 
+
+Instead of generating a new random number for each simulation for each day as we did in the loop version, we'll generate a matrix of all the random numbers we'll need for the entire simulation, at the outset. That's the matrix `epsilon` in the code below.
+
+Then, we can transform that matrix in a *single operation* to `nsim * t` realisations of a GBM with our desired parameters. 
+
+As a final step, we add an initial price given by `S0` to the first element of each simulation, then we take the cumulative product through time to get our price paths. 
+
+Here's the code:
+
+```{r}
+gbm_vec <- function(nsim = 100, t = 25, mu = 0, sigma = 0.1, S0 = 100, dt = 1./365) {
+  
+  # matrix of random draws - one for each day for each simulation
+  epsilon <- matrix(rnorm(t*nsim), ncol = nsim, nrow = t)  
+  
+  # get GBM and convert to price paths
+  gbm <- exp((mu - sigma * sigma / 2) * dt + sigma * epsilon * sqrt(dt))
+  gbm <- apply(rbind(rep(S0, nsim), gbm), 2, cumprod)
+  
+  return(gbm)
+}
+```
+
+If I run it 50 times, I get price paths that look like this:
+
+```{r, vec_sim}
+nsim <- 50
+t <- 100
+mu <- 0
+sigma <- 0.1
+S0 <- 100
+
+gbm <- gbm_vec(nsim, t, mu, sigma, S0)
+
+gbm_df <- as.data.frame(gbm) %>%
+  mutate(ix = 1:nrow(gbm)) %>%
+  pivot_longer(-ix, names_to = 'sim', values_to = 'price')
+
+gbm_df %>%
+  ggplot(aes(x=ix, y=price, color=sim)) +
+  geom_line() +
+  theme(legend.position = 'none')
+```
+
+All good so far. 
+
+Let's ask it for 50,000 simulated price paths and see if we get a speed-up over our loop version:
+
+
+```{r}
+start <- Sys.time()
+gbm <- gbm_vec(nsim = 50000, t, mu, sigma, S0)
+Sys.time() - start
+
+```
+
+Nice! That's the best part of an order of magnitude speed-up.
+
+## What could a GBM simulator be used for?
+
+We could use it estimate the distribution of prices at some point in the future, given our model assumptions:
+
+```{r, terminal_prices_distribution}
+data.frame(price = gbm[t, ]) %>%
+  ggplot(aes(x = price)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.1) +
+    geom_density() + 
+    ggtitle('terminal price distribution')
+```
+
+And from there, estimate the *probability-weighted payoff curve* for an option on the stock being simulated, say a call option struck at 105 (again, given our model assumptions):
+
+```{r, theoretical_payoff_plot}
+D <- gbm[t, ] %>%
+    density()
+
+strike = 105
+
+profile <- tibble(
+  price = D$x, 
+  value = case_when(price <= strike ~ 0, TRUE ~ price - strike)
+)
+   
+# dataframe of payoffs and probabilities 
+prob_wieghted_payoff_profile <- profile %>%
+    mutate(density = D$y/sum(D$y)) 
+  
+prob_wieghted_payoff_profile %>%
+    ggplot(aes(x = price, y = value*density)) +
+    geom_line() +
+    xlab('price') +
+    ylab('probability-weighted payoff')
+```
+And finally, we can get the expected value of our option by summing the area under the probability-weighted payoff curve:
+
+```{r}
+expected_value <- prob_wieghted_payoff_profile %>%
+  summarise(ev = sum(density * value))
+
+expected_value
+```
+
+
+## Conclusion
+
+A Gemoetric Brownian Motion simulator is one of the first tools you reach for when you start trying to model the stock prices. 
+
+In particular, it's a useful tool for building intuition about concepts such as options pricing. 
+
+Leveraging R's vectorisation tools, we can run tens of thousands of simulations in no time at all.
+
