@@ -3,6 +3,8 @@
 # exclude the 20% remaining with lowest trailing monthly volume.
 
 library(rwRtools)
+library(tidyverse)
+library(roll)
 rwlab_data_auth()
 
 futures <- rwRtools::crypto_get_binance_spot_1h()
@@ -37,7 +39,8 @@ universe <- universe %>%
     funding_returns_simple = lead(-funding_rate),
     funding_returns_log = log(funding_returns_simple + 1),
     total_returns_simple = m2m_returns_simple + funding_returns_simple,
-    total_returns_log = log(total_returns_simple + 1)
+    total_returns_log = log(total_returns_simple + 1),
+    dollar_volume = Volume*Close
   )
 
 universe %>% head()
@@ -45,7 +48,7 @@ universe %>% head()
 universe <- universe %>% 
   mutate(
     is_universe_price = min(Open, High, Low, Close) >= 0.01,
-    trail_volume = roll_mean(Volume, 30 * 24)
+    trail_volume = roll_mean(dollar_volume, 30 * 24)
   ) %>%
   na.omit() %>%
   group_by(Datetime) %>%
@@ -66,7 +69,7 @@ daily <- universe %>%
     high = max(High),
     low = min(Low),
     close = last(Close),
-    volume = sum(Volume),
+    dollar_volume = sum(dollar_volume),
     m2m_returns_log = sum(m2m_returns_log),
     m2m_returns_simple = exp(m2m_returns_log) - 1,
     funding_returns_log = sum(funding_returns_log),
@@ -86,6 +89,6 @@ daily <- daily %>%
 head(daily)
 
 daily %>% 
-  select(-m2m_returns_log, -m2m_returns_simple, -funding_returns_simple, -total_returns_simple) %>% 
+  select(-m2m_returns_log, -m2m_returns_simple, -funding_returns_simple) %>% 
   write_csv("binance_perp_daily.csv")
 
