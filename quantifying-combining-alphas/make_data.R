@@ -69,6 +69,9 @@ daily <- daily %>%
 daily <- daily %>%
   filter(! (ticker == "LUNAUSDT" & date >= "2022-05-13"))
 
+# remove non-USDT perps
+daily <- daily %>%
+  filter(stringr::str_ends(ticker, "USDT"))
 
 head(daily)
 
