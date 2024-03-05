@@ -1,2 +1,2 @@
-# r-quant-recipes
-Quant Trading Recipes in R
+# Trader Tales
+Code from the Robot Wealth blog.
