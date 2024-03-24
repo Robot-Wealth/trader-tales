@@ -49,7 +49,7 @@ class ibapp(EClient, EWrapper):
 
     # override Ewrapper.nextValidID - used to signal that the connection between application and TWS is complete
     # returns the next valid orderID (for any future transactions)
-    # if we send messages before the connection has been established, they can be low
+    # if we send messages before the connection has been established, they can be lost
     # so wait for this method to be called
     def nextValidId(self, orderId: int):
         print(f"Connection ready, next valid order ID: {orderId}")
