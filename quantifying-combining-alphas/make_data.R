@@ -62,7 +62,7 @@ daily %>% head
 # filter on first perp date
 daily <- daily %>%
   filter(date > "2019-09-10") %>%
-  filter(date <= "2024-02-13") %>% 
+  filter(date <= "2025-02-07") %>% 
   rename(ticker = "Ticker")
 
 # remove LUNAUSDT from Friday 13 May 2022. Even though it continued to exist after this, there's no way you'd include it in your universe of tradable assets.
@@ -77,5 +77,6 @@ head(daily)
 
 daily %>% 
   # select(-m2m_returns_log, -m2m_returns_simple) %>% 
-  write_csv("quantifying-combining-alphas/binance_perp_daily.csv")
+  # write_csv("quantifying-combining-alphas/binance_perp_daily.csv")
+  write_csv("data/binance_perp_daily.csv")
 
